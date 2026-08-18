@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity } from 'react-native';
+import { StyleSheet, Text, View, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Eye, EyeOff, Lock, User } from 'lucide-react-native';
+import { Lock } from 'lucide-react-native';
 import { colors, fonts, radius, spacing } from '@/lib/theme';
 import { useAuth } from '@/lib/auth';
 import { Button } from '@/components/Button';
@@ -9,23 +9,21 @@ import { Button } from '@/components/Button';
 export default function LoginScreen() {
   const router = useRouter();
   const { login } = useAuth();
-  const [loginName, setLoginName] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleLogin = () => {
     setError('');
-    if (!loginName.trim() || !password.trim()) {
-      setError('Please enter your login name and password.');
+    if (!pin.trim()) {
+      setError('Please enter your PIN.');
       return;
     }
     setLoading(true);
     setTimeout(() => {
-      const success = login(loginName.trim(), password);
+      const success = login(pin.trim());
       if (!success) {
-        setError('Invalid login name or password. Please try again.');
+        setError('Invalid PIN. Please try again.');
         setLoading(false);
         return;
       }
@@ -47,45 +45,21 @@ export default function LoginScreen() {
 
         <View style={styles.form}>
           <View style={styles.field}>
-            <Text style={styles.label}>Login Name</Text>
-            <View style={styles.inputContainer}>
-              <User size={18} color={colors.slate400} strokeWidth={2} />
-              <TextInput
-                style={styles.input}
-                placeholder="Enter login name"
-                placeholderTextColor={colors.slate400}
-                value={loginName}
-                onChangeText={setLoginName}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </View>
-          </View>
-
-          <View style={styles.field}>
-            <Text style={styles.label}>Password</Text>
+            <Text style={styles.label}>Operator PIN</Text>
             <View style={styles.inputContainer}>
               <Lock size={18} color={colors.slate400} strokeWidth={2} />
               <TextInput
                 style={styles.input}
-                placeholder="Enter password"
+                placeholder="Enter your PIN"
                 placeholderTextColor={colors.slate400}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
+                value={pin}
+                onChangeText={setPin}
+                keyboardType="numeric"
+                secureTextEntry
+                maxLength={4}
                 autoCapitalize="none"
                 autoCorrect={false}
               />
-              <TouchableOpacity
-                onPress={() => setShowPassword((v) => !v)}
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              >
-                {showPassword ? (
-                  <EyeOff size={18} color={colors.slate400} strokeWidth={2} />
-                ) : (
-                  <Eye size={18} color={colors.slate400} strokeWidth={2} />
-                )}
-              </TouchableOpacity>
             </View>
           </View>
 
@@ -94,7 +68,7 @@ export default function LoginScreen() {
           <Button label="Sign In" onPress={handleLogin} loading={loading} style={styles.signInButton} />
 
           <View style={styles.hintContainer}>
-            <Text style={styles.hintText}>Demo credentials: jcruz / operator123</Text>
+            <Text style={styles.hintText}>Demo PINs: 1234 (Juan), 5678 (Richard), 9999 (Pedro)</Text>
           </View>
         </View>
 
@@ -178,9 +152,10 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontFamily: fonts.regular,
-    fontSize: 14,
+    fontSize: 16,
     color: colors.slate900,
     minHeight: 24,
+    letterSpacing: 4,
   },
   errorText: {
     fontFamily: fonts.medium,

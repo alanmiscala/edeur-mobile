@@ -1,32 +1,37 @@
 import { useState } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity } from 'react-native';
-import { useRouter } from 'expo-router';
+import { StyleSheet, Text, View, TextInput } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Lock, Users } from 'lucide-react-native';
 import { colors, fonts, radius, spacing } from '@/lib/theme';
 import { useAuth } from '@/lib/auth';
-import { mockRepository } from '@/lib/mockRepository';
 import { Button } from '@/components/Button';
 import { PageHeader } from '@/components/PageHeader';
 import { Card } from '@/components/Card';
 
 export default function RelieverLoginScreen() {
   const router = useRouter();
+  const { deurId } = useLocalSearchParams<{ deurId?: string }>();
   const { loginReliever } = useAuth();
+  const [name, setName] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleLogin = () => {
     setError('');
+    if (!name.trim()) {
+      setError('Please enter your name.');
+      return;
+    }
     if (!pin.trim()) {
       setError('Please enter your PIN.');
       return;
     }
     setLoading(true);
     setTimeout(() => {
-      const success = loginReliever(pin.trim());
+      const success = loginReliever(name.trim(), pin.trim(), deurId);
       if (!success) {
-        setError('Invalid PIN. Please try again.');
+        setError('Invalid name or PIN. Please try again.');
         setLoading(false);
         return;
       }
@@ -44,10 +49,26 @@ export default function RelieverLoginScreen() {
             <Users size={32} color={colors.blue600} strokeWidth={2} />
           </View>
           <Text style={styles.title}>Reliever Operator</Text>
-          <Text style={styles.subtitle}>Enter your PIN to continue the active DEUR</Text>
+          <Text style={styles.subtitle}>Enter your name and PIN to continue the active DEUR</Text>
         </View>
 
         <Card style={styles.card}>
+          <View style={styles.field}>
+            <Text style={styles.label}>Operator Name</Text>
+            <View style={styles.inputContainer}>
+              <Users size={18} color={colors.slate400} strokeWidth={2} />
+              <TextInput
+                style={styles.input}
+                placeholder="Enter your full name"
+                placeholderTextColor={colors.slate400}
+                value={name}
+                onChangeText={setName}
+                autoCapitalize="words"
+                autoCorrect={false}
+              />
+            </View>
+          </View>
+
           <View style={styles.field}>
             <Text style={styles.label}>PIN</Text>
             <View style={styles.inputContainer}>
@@ -72,7 +93,7 @@ export default function RelieverLoginScreen() {
         <Button label="Continue DEUR" onPress={handleLogin} loading={loading} style={styles.ctaButton} />
 
         <View style={styles.hintContainer}>
-          <Text style={styles.hintText}>Demo reliever PIN: 9999 (Pedro Reyes)</Text>
+          <Text style={styles.hintText}>Demo reliever: Pedro Reyes / PIN 9999</Text>
         </View>
       </View>
     </View>

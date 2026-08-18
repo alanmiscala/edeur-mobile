@@ -271,18 +271,17 @@ function persist(): void {
 }
 
 export const mockRepository = {
-  authenticate(loginName: string, password: string): User | null {
-    return (
-      sampleUsers.find(
-        (u) =>
-          u.loginName.toLowerCase() === loginName.toLowerCase() &&
-          u.password === password,
-      ) ?? null
-    );
+  authenticateByPin(pin: string): Operator | null {
+    return sampleOperators.find((o) => o.pin === pin) ?? null;
   },
 
-  authenticateReliever(pin: string): Operator | null {
-    const op = sampleOperators.find((o) => o.pin === pin && o.isReliever);
+  authenticateReliever(name: string, pin: string): Operator | null {
+    const op = sampleOperators.find(
+      (o) =>
+        o.pin === pin &&
+        o.isReliever &&
+        o.name.toLowerCase() === name.trim().toLowerCase(),
+    );
     return op ?? null;
   },
 
@@ -337,6 +336,17 @@ export const mockRepository = {
     );
   },
 
+  getSubmittedDeurForRentalToday(rentalId: string): Deur | null {
+    return (
+      deurStore.find(
+        (d) =>
+          d.rentalId === rentalId &&
+          d.date === today() &&
+          (d.status === 'Submitted' || d.status === 'Acknowledged'),
+      ) ?? null
+    );
+  },
+
   getDeurById(id: string): Deur | null {
     return deurStore.find((d) => d.id === id) ?? null;
   },
@@ -365,7 +375,9 @@ export const mockRepository = {
       (d) =>
         d.operatorId === params.operatorId &&
         d.rentalId === params.rentalId &&
-        d.date === today(),
+        d.date === today() &&
+        d.status !== 'Submitted' &&
+        d.status !== 'Acknowledged',
     );
     if (existing) return existing;
 

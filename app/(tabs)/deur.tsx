@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Modal, TextInput, type ViewStyle } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Truck, Clock, Fuel, Gauge, MessageSquare, AlertTriangle, Square, Users, MapPin } from 'lucide-react-native';
+import { Truck, Clock, Fuel, Gauge, MessageSquare, TriangleAlert as AlertTriangle, Square, Users, MapPin } from 'lucide-react-native';
 import { colors, fonts, radius, spacing } from '@/lib/theme';
 import { useAuth } from '@/lib/auth';
 import { mockRepository } from '@/lib/mockRepository';
@@ -52,15 +52,16 @@ export default function DeurScreen() {
     if (!operator) return;
     const rental = mockRepository.getRentalForOperator(operator.id);
     if (!rental) {
-      const activeDeur = mockRepository.getActiveDeurForRental('');
       setDeur(null);
       return;
     }
-    let d = mockRepository.getDeurForToday(operator.id, rental.id);
-    if (!d) {
-      d = mockRepository.getActiveDeurForRental(rental.id) ?? null;
+    const activeDeur = mockRepository.getActiveDeurForRental(rental.id);
+    if (activeDeur) {
+      setDeur({ ...activeDeur, activities: [...activeDeur.activities], fuelEntries: [...activeDeur.fuelEntries], operatorSegments: [...activeDeur.operatorSegments] });
+      return;
     }
-    setDeur(d ? { ...d, activities: [...d.activities], fuelEntries: [...d.fuelEntries], operatorSegments: [...d.operatorSegments] } : null);
+    const myDeur = mockRepository.getDeurForToday(operator.id, rental.id);
+    setDeur(myDeur ? { ...myDeur, activities: [...myDeur.activities], fuelEntries: [...myDeur.fuelEntries], operatorSegments: [...myDeur.operatorSegments] } : null);
   }, [operator]);
 
   useEffect(() => {
@@ -129,8 +130,9 @@ export default function DeurScreen() {
   };
 
   const handleTurnOver = () => {
+    if (!deur) return;
     setShowTurnOverConfirm(false);
-    router.push('/reliever-login');
+    router.push(`/reliever-login?deurId=${deur.id}`);
   };
 
   if (!equipment || !project || !rental) {
@@ -504,6 +506,11 @@ export default function DeurScreen() {
             onPress={() => router.push(`/deur-summary/${deur.id}`)}
             variant="secondary"
           />
+          <Button
+            label="START NEW DEUR"
+            onPress={() => setShowStartConfirm(true)}
+            style={styles.ctaButton}
+          />
         </Card>
       )}
 
@@ -518,6 +525,11 @@ export default function DeurScreen() {
             label="VIEW SUMMARY"
             onPress={() => router.push(`/deur-summary/${deur.id}`)}
             variant="secondary"
+          />
+          <Button
+            label="START NEW DEUR"
+            onPress={() => setShowStartConfirm(true)}
+            style={styles.ctaButton}
           />
         </Card>
       )}

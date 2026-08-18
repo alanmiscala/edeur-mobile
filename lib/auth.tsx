@@ -4,8 +4,8 @@ import type { Operator } from './types';
 
 interface AuthContextValue {
   operator: Operator | null;
-  login: (loginName: string, password: string) => boolean;
-  loginReliever: (pin: string) => boolean;
+  login: (pin: string) => boolean;
+  loginReliever: (name: string, pin: string, deurId?: string) => boolean;
   logout: () => void;
 }
 
@@ -51,19 +51,20 @@ function clearSession(): void {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [operator, setOperator] = useState<Operator | null>(loadSession);
 
-  const login = (loginName: string, password: string) => {
-    const user = mockRepository.authenticate(loginName, password);
-    if (!user) return false;
-    const op = mockRepository.getOperator(user.operatorId);
+  const login = (pin: string) => {
+    const op = mockRepository.authenticateByPin(pin);
     if (!op) return false;
     setOperator(op);
     saveSession(op.id);
     return true;
   };
 
-  const loginReliever = (pin: string) => {
-    const op = mockRepository.authenticateReliever(pin);
+  const loginReliever = (name: string, pin: string, deurId?: string) => {
+    const op = mockRepository.authenticateReliever(name, pin);
     if (!op) return false;
+    if (deurId) {
+      mockRepository.turnOverToReliever(deurId, op.id, op.name);
+    }
     setOperator(op);
     saveSession(op.id);
     return true;
