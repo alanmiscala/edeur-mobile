@@ -336,6 +336,17 @@ export const mockRepository = {
     );
   },
 
+  getActiveDeurForOperator(operatorId: string): Deur | null {
+    return (
+      deurStore.find(
+        (d) =>
+          d.date === today() &&
+          d.status === 'Active' &&
+          d.operatorSegments.some((s) => s.operatorId === operatorId && s.endTime === null),
+      ) ?? null
+    );
+  },
+
   getSubmittedDeurForRentalToday(rentalId: string): Deur | null {
     return (
       deurStore.find(

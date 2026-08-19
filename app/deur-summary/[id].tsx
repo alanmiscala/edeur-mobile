@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { StyleSheet, Text, View, ScrollView } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Truck, FileText, Clock, Gauge, Fuel, MessageSquare, AlertTriangle, Users } from 'lucide-react-native';
+import { Truck, FileText, Clock, Gauge, Fuel, MessageSquare, TriangleAlert as AlertTriangle, Users, Navigation } from 'lucide-react-native';
 import { colors, fonts, radius, spacing } from '@/lib/theme';
 import { mockRepository } from '@/lib/mockRepository';
 import { Card } from '@/components/Card';
@@ -230,6 +230,39 @@ export default function DeurSummaryScreen() {
             </>
           ) : null}
         </Card>
+
+        {/* Travel Log */}
+        {deur.travelLocation && (deur.travelLocation.pointA || deur.travelLocation.pointB) && (
+          <>
+            <Text style={styles.sectionLabel}>TRAVEL LOG</Text>
+            <Card style={styles.card}>
+              <View style={styles.remarkRow}>
+                <Navigation size={16} color={colors.blue600} strokeWidth={2} />
+                <Text style={styles.remarkLabel}>Travel Location</Text>
+              </View>
+              <View style={styles.travelRow}>
+                <Text style={styles.travelLabel}>Point A</Text>
+                <Text style={styles.travelValue}>{deur.travelLocation.pointA || '---'}</Text>
+                {deur.travelLocation.gpsA && (
+                  <Text style={styles.travelGps}>GPS: {deur.travelLocation.gpsA.lat.toFixed(5)}, {deur.travelLocation.gpsA.lng.toFixed(5)}</Text>
+                )}
+              </View>
+              <View style={styles.divider} />
+              <View style={styles.travelRow}>
+                <Text style={styles.travelLabel}>Point B</Text>
+                <Text style={styles.travelValue}>{deur.travelLocation.pointB || '---'}</Text>
+                {deur.travelLocation.gpsB && (
+                  <Text style={styles.travelGps}>GPS: {deur.travelLocation.gpsB.lat.toFixed(5)}, {deur.travelLocation.gpsB.lng.toFixed(5)}</Text>
+                )}
+              </View>
+              <View style={styles.divider} />
+              <View style={styles.travelRow}>
+                <Text style={styles.travelLabel}>Source</Text>
+                <Text style={styles.travelValue}>{deur.travelLocation.source}</Text>
+              </View>
+            </Card>
+          </>
+        )}
 
         {/* Activity timeline */}
         <Text style={styles.sectionLabel}>ACTIVITY TIMELINE</Text>
@@ -526,6 +559,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 16,
     lineHeight: 20,
+  },
+  travelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 12,
+    flexWrap: 'wrap',
+  },
+  travelLabel: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.slate500,
+  },
+  travelValue: {
+    fontFamily: fonts.bold,
+    fontSize: 14,
+    color: colors.slate900,
+  },
+  travelGps: {
+    fontFamily: fonts.medium,
+    fontSize: 12,
+    color: colors.emerald500,
   },
   timelineRow: {
     flexDirection: 'row',

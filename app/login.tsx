@@ -1,10 +1,9 @@
 import { useState } from 'react';
-import { StyleSheet, Text, View, TextInput } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Lock } from 'lucide-react-native';
 import { colors, fonts, radius, spacing } from '@/lib/theme';
 import { useAuth } from '@/lib/auth';
-import { Button } from '@/components/Button';
+import { PinPad } from '@/components/PinPad';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -24,6 +23,7 @@ export default function LoginScreen() {
       const success = login(pin.trim());
       if (!success) {
         setError('Invalid PIN. Please try again.');
+        setPin('');
         setLoading(false);
         return;
       }
@@ -34,49 +34,41 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.content}>
-        <View style={styles.logoSection}>
-          <View style={styles.logoBadge}>
-            <Text style={styles.logoText}>ER</Text>
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+        <View style={styles.content}>
+          <View style={styles.logoSection}>
+            <View style={styles.logoBadge}>
+              <Text style={styles.logoText}>ER</Text>
+            </View>
+            <Text style={styles.title}>EQUIPMENT RENTAL</Text>
+            <Text style={styles.subtitle}>Operator Field Application</Text>
           </View>
-          <Text style={styles.title}>EQUIPMENT RENTAL</Text>
-          <Text style={styles.subtitle}>Operator Field Application</Text>
-        </View>
 
-        <View style={styles.form}>
-          <View style={styles.field}>
+          <View style={styles.form}>
             <Text style={styles.label}>Operator PIN</Text>
-            <View style={styles.inputContainer}>
-              <Lock size={18} color={colors.slate400} strokeWidth={2} />
-              <TextInput
-                style={styles.input}
-                placeholder="Enter your PIN"
-                placeholderTextColor={colors.slate400}
-                value={pin}
-                onChangeText={setPin}
-                keyboardType="numeric"
-                secureTextEntry
-                maxLength={4}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
+
+            <PinPad
+              value={pin}
+              onChange={setPin}
+              maxLength={4}
+              onSubmit={handleLogin}
+              submitLabel="Sign In"
+              loading={loading}
+            />
+
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+            <View style={styles.hintContainer}>
+              <Text style={styles.hintText}>Demo PINs: 1234 (Juan), 5678 (Richard), 9999 (Pedro)</Text>
             </View>
           </View>
 
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-          <Button label="Sign In" onPress={handleLogin} loading={loading} style={styles.signInButton} />
-
-          <View style={styles.hintContainer}>
-            <Text style={styles.hintText}>Demo PINs: 1234 (Juan), 5678 (Richard), 9999 (Pedro)</Text>
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>Authorized personnel access only.</Text>
+            <Text style={styles.footerText}>v1.0.0 • Field operations</Text>
           </View>
         </View>
-
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>Authorized personnel access only.</Text>
-          <Text style={styles.footerText}>v1.0.0 • Field operations</Text>
-        </View>
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -85,16 +77,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.slate50,
-  paddingTop: 60,
-  paddingBottom: 40,
-  paddingHorizontal: spacing.xl,
-  gap: 36,
-  alignItems: 'center',
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingTop: 60,
+    paddingBottom: 40,
+    paddingHorizontal: spacing.xl,
     justifyContent: 'center',
   },
   content: {
     width: '100%',
     maxWidth: 360,
+    alignSelf: 'center',
     alignItems: 'center',
     gap: 36,
   },
@@ -128,49 +122,25 @@ const styles = StyleSheet.create({
   },
   form: {
     width: '100%',
+    alignItems: 'center',
     gap: spacing.lg,
-  },
-  field: {
-    gap: 6,
   },
   label: {
     fontFamily: fonts.semibold,
     fontSize: 13,
     color: colors.slate900,
   },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: colors.white,
-    borderWidth: 1.5,
-    borderColor: colors.slate200,
-    borderRadius: radius.md,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
-  input: {
-    flex: 1,
-    fontFamily: fonts.regular,
-    fontSize: 16,
-    color: colors.slate900,
-    minHeight: 24,
-    letterSpacing: 4,
-  },
   errorText: {
     fontFamily: fonts.medium,
     fontSize: 13,
     color: colors.red500,
-  },
-  signInButton: {
-    width: '100%',
+    textAlign: 'center',
   },
   hintContainer: {
     backgroundColor: colors.blue50,
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: radius.sm,
-    alignSelf: 'center',
   },
   hintText: {
     fontFamily: fonts.medium,

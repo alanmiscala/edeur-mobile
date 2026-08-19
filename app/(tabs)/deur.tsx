@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Modal, TextInput, type ViewStyle } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Truck, Clock, Fuel, Gauge, MessageSquare, TriangleAlert as AlertTriangle, Square, Users, MapPin } from 'lucide-react-native';
+import { Truck, Clock, Fuel, Gauge, MessageSquare, TriangleAlert as AlertTriangle, Square, Users, MapPin, Navigation } from 'lucide-react-native';
 import { colors, fonts, radius, spacing } from '@/lib/theme';
 import { useAuth } from '@/lib/auth';
 import { mockRepository } from '@/lib/mockRepository';
@@ -50,6 +50,14 @@ export default function DeurScreen() {
 
   const refreshDeur = useCallback(() => {
     if (!operator) return;
+
+    // Reliever: may not have a rental/assignment, so check for an active DEUR first
+    const activeBySegment = mockRepository.getActiveDeurForOperator(operator.id);
+    if (activeBySegment) {
+      setDeur({ ...activeBySegment, activities: [...activeBySegment.activities], fuelEntries: [...activeBySegment.fuelEntries], operatorSegments: [...activeBySegment.operatorSegments] });
+      return;
+    }
+
     const rental = mockRepository.getRentalForOperator(operator.id);
     if (!rental) {
       setDeur(null);
@@ -71,18 +79,35 @@ export default function DeurScreen() {
   if (!operator) return null;
 
   const assignment = mockRepository.getOperatorAssignment(operator.id);
-  const equipment = assignment ? mockRepository.getEquipment(assignment.equipmentId) : null;
-  const project = assignment ? mockRepository.getProject(assignment.projectId) : null;
-  const rental = mockRepository.getRentalForOperator(operator.id);
+  const rental = assignment ? mockRepository.getRentalForOperator(operator.id) : null;
+
+  // Reliever fallback: derive equipment/project/rental from the active DEUR
+  let equipment = assignment ? mockRepository.getEquipment(assignment.equipmentId) : null;
+  let project = assignment ? mockRepository.getProject(assignment.projectId) : null;
+  let activeRental = rental;
+
+  if (!equipment && deur) {
+    equipment = mockRepository.getEquipment(deur.equipmentId);
+    project = mockRepository.getProject(deur.projectId);
+    activeRental = mockRepository.getRental(deur.rentalId);
+  }
+
+  if (!equipment || !project || !activeRental) {
+    return (
+      <View style={styles.centerContainer}>
+        <Text style={styles.emptyText}>No active assignment found.</Text>
+      </View>
+    );
+  }
 
   const handleStart = () => {
-    if (!operator || !assignment || !rental) return;
+    if (!operator || !assignment || !activeRental) return;
     const d = mockRepository.createDeur({
       operatorId: operator.id,
       operatorName: operator.name,
       equipmentId: assignment.equipmentId,
       assignmentId: assignment.id,
-      rentalId: rental.id,
+      rentalId: activeRental.id,
       projectId: assignment.projectId,
       openingMeter: equipment?.hourMeter ?? null,
       openingOdometer: equipment?.hasOdometer ? equipment.hourMeter : null,
@@ -135,7 +160,7 @@ export default function DeurScreen() {
     router.push(`/reliever-login?deurId=${deur.id}`);
   };
 
-  if (!equipment || !project || !rental) {
+  if (!equipment || !project || !activeRental) {
     return (
       <View style={styles.centerContainer}>
         <Text style={styles.emptyText}>No active assignment found.</Text>
@@ -167,11 +192,11 @@ export default function DeurScreen() {
           <View style={styles.infoGrid}>
             <View style={styles.infoItem}>
               <Text style={styles.infoLabel}>Rental</Text>
-              <Text style={styles.infoValue}>{rental.rentalNumber}</Text>
+              <Text style={styles.infoValue}>{activeRental.rentalNumber}</Text>
             </View>
             <View style={styles.infoItem}>
               <Text style={styles.infoLabel}>Billing</Text>
-              <Text style={styles.infoValue}>{rental.billingMethod}</Text>
+              <Text style={styles.infoValue}>{activeRental.billingMethod}</Text>
             </View>
             <View style={styles.infoItem}>
               <Text style={styles.infoLabel}>Project</Text>
@@ -234,7 +259,7 @@ export default function DeurScreen() {
           </View>
           <View style={styles.equipmentInfo}>
             <Text style={styles.equipmentName}>{equipment.name}</Text>
-            <Text style={styles.assetNumber}>{equipment.assetNumber} • {rental.rentalNumber}</Text>
+            <Text style={styles.assetNumber}>{equipment.assetNumber} • {activeRental.rentalNumber}</Text>
           </View>
           <StatusChip
             label={deur.status.toUpperCase()}
@@ -248,7 +273,7 @@ export default function DeurScreen() {
           </View>
           <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>Billing</Text>
-            <Text style={styles.infoValue}>{rental.billingMethod}</Text>
+            <Text style={styles.infoValue}>{activeRental.billingMethod}</Text>
           </View>
           <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>Date</Text>
@@ -423,6 +448,14 @@ export default function DeurScreen() {
         >
           <MessageSquare size={20} color={colors.blue600} strokeWidth={2} />
           <Text style={styles.quickActionLabel}>Remarks</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.quickAction}
+          onPress={() => router.push(`/deur-travel/${deur.id}`)}
+          disabled={!isActive && deur.status !== 'Ended'}
+        >
+          <Navigation size={20} color={colors.blue600} strokeWidth={2} />
+          <Text style={styles.quickActionLabel}>Travel</Text>
         </TouchableOpacity>
       </View>
 
