@@ -1,1081 +1,347 @@
 import { useState, useEffect, useCallback } from 'react';
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Modal, TextInput, type ViewStyle } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Modal, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Truck, Clock, Fuel, Gauge, MessageSquare, TriangleAlert as AlertTriangle, Square, Users, MapPin, Navigation } from 'lucide-react-native';
-import { colors, fonts, radius, spacing } from '@/lib/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Menu as MenuIcon, Square, Users, Gauge, TriangleAlert as AlertTriangle, Navigation, Fuel } from 'lucide-react-native';
+import { useTheme } from '@/lib/useTheme';
 import { useAuth } from '@/lib/auth';
 import { mockRepository } from '@/lib/mockRepository';
 import type { ActivityType, Deur } from '@/lib/types';
-import { Card } from '@/components/Card';
-import { StatusChip } from '@/components/StatusChip';
 import { Button } from '@/components/Button';
+import { StatusChip } from '@/components/StatusChip';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { SyncBanner } from '@/components/SyncBanner';
+import { DeurDetailsDrawer } from '@/components/DeurDetailsDrawer';
 import { useConnectivity } from '@/lib/useConnectivity';
-import {
-  formatDuration,
-  formatTime,
-  formatDate,
-  getActivityTotals,
-  getCurrentActivity,
-  getActivityColor,
-  getNetOperatingTime,
-  getGrossProductiveTime,
-  getTotalShiftTime,
-} from '@/lib/utils';
+import { spacing, radius } from '@/lib/theme';
+import { formatDuration, getActivityColor, getNetOperatingTime, getTotalShiftTime, getStatusVariant } from '@/lib/utils';
+import type { ThemeColors } from '@/lib/theme';
 
-const ACTIVITIES: { type: ActivityType; color: string; bgColor: string }[] = [
-  { type: 'Operating', color: colors.emerald500, bgColor: colors.emerald50 },
-  { type: 'Waiting', color: colors.amber500, bgColor: colors.amber100 },
-  { type: 'Breakdown', color: colors.red500, bgColor: colors.red50 },
+const ACTS: { type: ActivityType; color: string; bgKey: 'emerald50' | 'amber100' | 'red50' | 'indigo50' }[] = [
+  { type: 'Operating', color: '#10b981', bgKey: 'emerald50' },
+  { type: 'Waiting', color: '#f59e0b', bgKey: 'amber100' },
+  { type: 'Breakdown', color: '#ef4444', bgKey: 'red50' },
+  { type: 'Meal Break', color: '#6366f1', bgKey: 'indigo50' },
 ];
 
 export default function DeurScreen() {
   const router = useRouter();
-  const { operator } = useAuth();
+  const { operator, pendingDeurId, resumeDeur } = useAuth();
+  const { colors: c } = useTheme();
+  const insets = useSafeAreaInsets();
   const [deur, setDeur] = useState<Deur | null>(null);
   const [, setTick] = useState(0);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [showStartConfirm, setShowStartConfirm] = useState(false);
   const [showTurnOverConfirm, setShowTurnOverConfirm] = useState(false);
-  const [waitingModalVisible, setWaitingModalVisible] = useState(false);
-  const [breakdownModalVisible, setBreakdownModalVisible] = useState(false);
+  const [drawerVisible, setDrawerVisible] = useState(false);
+  const [waitingModal, setWaitingModal] = useState(false);
+  const [breakdownModal, setBreakdownModal] = useState(false);
   const [breakdownRemarks, setBreakdownRemarks] = useState('');
+  const [showResumeConfirm, setShowResumeConfirm] = useState(false);
   const connectivity = useConnectivity();
 
-  useEffect(() => {
-    const interval = setInterval(() => setTick((t) => t + 1), 1000);
-    return () => clearInterval(interval);
-  }, []);
+  useEffect(() => { const i = setInterval(() => setTick((t) => t + 1), 1000); return () => clearInterval(i); }, []);
 
   const refreshDeur = useCallback(() => {
     if (!operator) return;
-
-    // Reliever: may not have a rental/assignment, so check for an active DEUR first
-    const activeBySegment = mockRepository.getActiveDeurForOperator(operator.id);
-    if (activeBySegment) {
-      setDeur({ ...activeBySegment, activities: [...activeBySegment.activities], fuelEntries: [...activeBySegment.fuelEntries], operatorSegments: [...activeBySegment.operatorSegments] });
+    // Use resumable lookup: open segment → turnover-pending → by assignment/equipment/rental → any today
+    const resumable = mockRepository.getResumableDeurForOperator(operator.id);
+    if (resumable) {
+      setDeur({ ...resumable, activities: [...resumable.activities], fuelEntries: [...resumable.fuelEntries], operatorSegments: [...resumable.operatorSegments], travelCheckpoints: [...resumable.travelCheckpoints] });
       return;
     }
-
-    const rental = mockRepository.getRentalForOperator(operator.id);
-    if (!rental) {
-      setDeur(null);
-      return;
-    }
-    const activeDeur = mockRepository.getActiveDeurForRental(rental.id);
-    if (activeDeur) {
-      setDeur({ ...activeDeur, activities: [...activeDeur.activities], fuelEntries: [...activeDeur.fuelEntries], operatorSegments: [...activeDeur.operatorSegments] });
-      return;
-    }
-    const myDeur = mockRepository.getDeurForToday(operator.id, rental.id);
-    setDeur(myDeur ? { ...myDeur, activities: [...myDeur.activities], fuelEntries: [...myDeur.fuelEntries], operatorSegments: [...myDeur.operatorSegments] } : null);
+    setDeur(null);
   }, [operator]);
 
-  useEffect(() => {
-    refreshDeur();
-  }, [refreshDeur]);
-
+  useEffect(() => { refreshDeur(); }, [refreshDeur]);
   if (!operator) return null;
 
-  const assignment = mockRepository.getOperatorAssignment(operator.id);
-  const rental = assignment ? mockRepository.getRentalForOperator(operator.id) : null;
-
-  // Reliever fallback: derive equipment/project/rental from the active DEUR
+  // Resolve assignment/rental/equipment from the DEUR first, then fallback to operator's own
+  const lookupDeur = deur;
+  const assignment = (lookupDeur ? mockRepository.getAssignmentForDeur(lookupDeur.id) : null) ?? mockRepository.getOperatorAssignment(operator.id);
+  const rental = (lookupDeur ? mockRepository.getRentalForDeur(lookupDeur.id) : null) ?? mockRepository.getRentalForOperator(operator.id);
   let equipment = assignment ? mockRepository.getEquipment(assignment.equipmentId) : null;
   let project = assignment ? mockRepository.getProject(assignment.projectId) : null;
   let activeRental = rental;
-
-  if (!equipment && deur) {
-    equipment = mockRepository.getEquipment(deur.equipmentId);
-    project = mockRepository.getProject(deur.projectId);
-    activeRental = mockRepository.getRental(deur.rentalId);
-  }
-
-  if (!equipment || !project || !activeRental) {
-    return (
-      <View style={styles.centerContainer}>
-        <Text style={styles.emptyText}>No active assignment found.</Text>
-      </View>
-    );
-  }
+  if (!equipment && lookupDeur) { equipment = mockRepository.getEquipment(lookupDeur.equipmentId); project = mockRepository.getProject(lookupDeur.projectId); activeRental = mockRepository.getRental(lookupDeur.rentalId); }
+  if (!equipment || !project || !activeRental) return <View style={[styles.center, { backgroundColor: c.background }]}><Text style={[styles.emptyText, { color: c.textMuted }]}>No active assignment found.</Text></View>;
 
   const handleStart = () => {
     if (!operator || !assignment || !activeRental) return;
-    const d = mockRepository.createDeur({
-      operatorId: operator.id,
-      operatorName: operator.name,
-      equipmentId: assignment.equipmentId,
-      assignmentId: assignment.id,
-      rentalId: activeRental.id,
-      projectId: assignment.projectId,
-      openingMeter: equipment?.hourMeter ?? null,
-      openingOdometer: equipment?.hasOdometer ? equipment.hourMeter : null,
-    });
-    setDeur({ ...d });
-    setShowStartConfirm(false);
+    // Guard: do not create if an Active DEUR already exists for this equipment/rental
+    const existing = mockRepository.getActiveDeurForEquipmentRental(assignment.equipmentId, activeRental.id);
+    if (existing) {
+      setDeur({ ...existing, activities: [...existing.activities], fuelEntries: [...existing.fuelEntries], operatorSegments: [...existing.operatorSegments], travelCheckpoints: [...existing.travelCheckpoints] });
+      setShowStartConfirm(false);
+      return;
+    }
+    const d = mockRepository.createDeur({ operatorId: operator.id, operatorName: operator.name, equipmentId: assignment.equipmentId, assignmentId: assignment.id, rentalId: activeRental.id, projectId: assignment.projectId, openingMeter: equipment?.hourMeter ?? null, openingOdometer: equipment?.hasOdometer ? equipment.hourMeter : null, isReliever: operator.isReliever });
+    setDeur({ ...d, activities: [...d.activities], fuelEntries: [...d.fuelEntries], operatorSegments: [...d.operatorSegments], travelCheckpoints: [...d.travelCheckpoints] }); setShowStartConfirm(false);
   };
 
-  const handleActivityPress = (activity: ActivityType) => {
+  const handleActivity = (act: ActivityType) => {
     if (!deur) return;
-    if (activity === 'Waiting') {
-      setWaitingModalVisible(true);
-    } else if (activity === 'Breakdown') {
-      setBreakdownRemarks('');
-      setBreakdownModalVisible(true);
-    } else {
-      const updated = mockRepository.startActivity(deur.id, activity);
-      if (updated) setDeur({ ...updated, activities: [...updated.activities] });
+    if (deur.status !== 'Active') return;
+    if (act === 'Waiting') { setWaitingModal(true); return; }
+    if (act === 'Breakdown') { setBreakdownRemarks(''); setBreakdownModal(true); return; }
+    const u = mockRepository.startActivity(deur.id, act); if (u) setDeur(u);
+  };
+
+  const handleWaitingReason = (reason: string) => { if (!deur) return; const u = mockRepository.startActivity(deur.id, 'Waiting', reason); if (u) setDeur(u); setWaitingModal(false); };
+  const handleBreakdownCat = (cat: string) => { if (!deur) return; const u = mockRepository.startActivity(deur.id, 'Breakdown', undefined, cat); if (u) setDeur(u); setBreakdownModal(false); setBreakdownRemarks(''); };
+  const handleEndShift = () => { if (!deur) return; const u = mockRepository.endShift(deur.id); if (u) { setDeur({ ...u, activities: [...u.activities], fuelEntries: [...u.fuelEntries], operatorSegments: [...u.operatorSegments], travelCheckpoints: [...u.travelCheckpoints] }); setShowEndConfirm(false); router.push(`/deur-summary/${u.id}`); } };
+  const handleTurnOver = () => { if (!deur) return; setShowTurnOverConfirm(false); router.push(`/turnover-login?deurId=${deur.id}`); };
+  const handleResume = () => {
+    if (!deur || !operator) return;
+    const ok = resumeDeur(deur.id);
+    if (ok) {
+      setShowResumeConfirm(false);
+      refreshDeur();
     }
   };
 
-  const handleWaitingReasonSelect = (reason: string) => {
-    if (!deur) return;
-    const updated = mockRepository.startActivity(deur.id, 'Waiting', reason);
-    if (updated) setDeur({ ...updated, activities: [...updated.activities] });
-    setWaitingModalVisible(false);
-  };
-
-  const handleBreakdownCategorySelect = (category: string) => {
-    if (!deur) return;
-    const updated = mockRepository.startActivity(deur.id, 'Breakdown', undefined, category);
-    if (updated) setDeur({ ...updated, activities: [...updated.activities] });
-    setBreakdownModalVisible(false);
-    setBreakdownRemarks('');
-  };
-
-  const handleEndShift = () => {
-    if (!deur) return;
-    const updated = mockRepository.endShift(deur.id);
-    if (updated) {
-      setDeur({ ...updated, activities: [...updated.activities], operatorSegments: [...updated.operatorSegments] });
-      setShowEndConfirm(false);
-      router.push(`/deur-summary/${updated.id}`);
-    }
-  };
-
-  const handleTurnOver = () => {
-    if (!deur) return;
-    setShowTurnOverConfirm(false);
-    router.push(`/reliever-login?deurId=${deur.id}`);
-  };
-
-  if (!equipment || !project || !activeRental) {
-    return (
-      <View style={styles.centerContainer}>
-        <Text style={styles.emptyText}>No active assignment found.</Text>
+  // No DEUR yet — check if we can start new (guard against active DEUR for same equipment/rental)
+  const canStart = mockRepository.canStartNewDeur(operator.id);
+  if (!deur) return (
+    <ScrollView style={[styles.container, { backgroundColor: c.background }]} contentContainerStyle={[styles.content, { paddingTop: spacing.lg + insets.top, paddingBottom: spacing.xxxl + 80 + insets.bottom }]}>
+      <View style={styles.header}><Text style={[styles.screenTitle, { color: c.textPrimary }]}>Digital DEUR</Text><Text style={[styles.screenSubtitle, { color: c.textMuted }]}>Daily Equipment Utilization Report</Text></View>
+      <SyncBanner status={connectivity} />
+      <View style={[styles.infoCard, { backgroundColor: c.surface, borderColor: c.surfaceBorder }]}>
+        <View style={styles.eqRow}><View style={[styles.eqIcon, { backgroundColor: c.blue50 }]}><Gauge size={20} color={c.blue600} strokeWidth={2} /></View><View style={{ flex: 1 }}><Text style={[styles.eqName, { color: c.textPrimary }]}>{equipment.name}</Text><Text style={[styles.eqAsset, { color: c.textMuted }]}>{equipment.assetNumber}</Text></View></View>
+        <View style={styles.infoGrid}><InfoItem label="Rental" value={activeRental.rentalNumber} c={c} /><InfoItem label="Billing" value={activeRental.billingMethod} c={c} /><InfoItem label="Project" value={project.name} c={c} /><InfoItem label="Operator" value={operator.name} c={c} /></View>
       </View>
-    );
-  }
+      <View style={[styles.meterCard, { backgroundColor: c.surface, borderColor: c.surfaceBorder }]}><View style={styles.meterRow}><Gauge size={18} color={c.textMuted} strokeWidth={2} /><Text style={[styles.meterLabel, { color: c.textSecondary }]}>Opening Hour Meter</Text><Text style={[styles.meterValue, { color: c.textPrimary }]}>{equipment.hourMeter.toLocaleString()} h</Text></View></View>
+      {canStart ? (
+        <View style={styles.startSection}><Text style={[styles.startHint, { color: c.textPrimary }]}>No DEUR has been started for today.</Text><Text style={[styles.startHintSub, { color: c.textMuted }]}>Starting a shift will create a new DEUR record and begin tracking your activity.</Text><Button label="START DEUR" onPress={() => setShowStartConfirm(true)} style={styles.cta} /></View>
+      ) : (
+        <View style={styles.startSection}><Text style={[styles.startHint, { color: c.textPrimary }]}>An active DEUR already exists for this equipment.</Text><Text style={[styles.startHintSub, { color: c.textMuted }]}>You cannot start a new DEUR until the current one is submitted.</Text></View>
+      )}
+      <ConfirmDialog visible={showStartConfirm} title="Start DEUR?" message="This will begin a new shift and start tracking your equipment activity for today." confirmLabel="Start Shift" onConfirm={handleStart} onCancel={() => setShowStartConfirm(false)} />
+    </ScrollView>
+  );
 
-  // No DEUR yet - show start screen
-  if (!deur) {
-    return (
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        <View style={styles.header}>
-          <Text style={styles.screenTitle}>Digital DEUR</Text>
-          <Text style={styles.screenSubtitle}>Daily Equipment Utilization Report</Text>
-        </View>
-
-        <SyncBanner status={connectivity} />
-
-        <Card style={styles.infoCard}>
-          <View style={styles.equipmentRow}>
-            <View style={styles.equipmentIcon}>
-              <Truck size={20} color={colors.blue600} strokeWidth={2} />
-            </View>
-            <View style={styles.equipmentInfo}>
-              <Text style={styles.equipmentName}>{equipment.name}</Text>
-              <Text style={styles.assetNumber}>{equipment.assetNumber}</Text>
-            </View>
-          </View>
-          <View style={styles.infoGrid}>
-            <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>Rental</Text>
-              <Text style={styles.infoValue}>{activeRental.rentalNumber}</Text>
-            </View>
-            <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>Billing</Text>
-              <Text style={styles.infoValue}>{activeRental.billingMethod}</Text>
-            </View>
-            <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>Project</Text>
-              <Text style={styles.infoValue}>{project.name}</Text>
-            </View>
-            <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>Operator</Text>
-              <Text style={styles.infoValue}>{operator.name}</Text>
-            </View>
-          </View>
-        </Card>
-
-        <Card style={styles.meterCard}>
-          <View style={styles.meterRow}>
-            <Gauge size={18} color={colors.slate400} strokeWidth={2} />
-            <Text style={styles.meterLabel}>Opening Hour Meter</Text>
-            <Text style={styles.meterValue}>{equipment.hourMeter.toLocaleString()} h</Text>
-          </View>
-        </Card>
-
-        <View style={styles.startSection}>
-          <Text style={styles.startHint}>No DEUR has been started for today.</Text>
-          <Text style={styles.startHintSub}>
-            Starting a shift will create a new DEUR record and begin tracking your activity.
-          </Text>
-          <Button label="START DEUR" onPress={() => setShowStartConfirm(true)} style={styles.ctaButton} />
-        </View>
-
-        <ConfirmDialog
-          visible={showStartConfirm}
-          title="Start DEUR?"
-          message="This will begin a new shift and start tracking your equipment activity for today."
-          confirmLabel="Start Shift"
-          onConfirm={handleStart}
-          onCancel={() => setShowStartConfirm(false)}
-        />
-      </ScrollView>
-    );
-  }
-
-  // Active or ended DEUR
-  const totals = getActivityTotals(deur);
-  const currentActivity = getCurrentActivity(deur);
+  const currentActivity = deur.activities.find((a) => a.endTime === null) ?? null;
   const isActive = deur.status === 'Active';
+  const isTurnoverPending = deur.status === 'Active' && deur.turnoverPending === true;
+  const isSubmitted = deur.status === 'Submitted' || deur.status === 'Waiting Acknowledgement' || deur.status === 'Acknowledged';
   const netOp = getNetOperatingTime(deur);
-  const grossProd = getGrossProductiveTime(deur);
   const totalShift = getTotalShiftTime(deur);
   const waitingReasons = mockRepository.getWaitingReasons();
-  const breakdownCategories = mockRepository.getBreakdownCategories();
+  const breakdownCats = mockRepository.getBreakdownCategories();
+  const currentColor = currentActivity ? getActivityColor(currentActivity.activity) : c.slate300;
+  const currentReason = currentActivity?.reason ?? currentActivity?.category;
+
+  const previousSegment = deur.operatorSegments.length > 0 ? deur.operatorSegments[deur.operatorSegments.length - 1] : null;
+
+  // TURNOVER-PENDING: show review/resume screen
+  if (isTurnoverPending) return (
+    <ScrollView style={[styles.container, { backgroundColor: c.background }]} contentContainerStyle={[styles.content, { paddingTop: spacing.lg + insets.top, paddingBottom: spacing.xxxl + 80 + insets.bottom }]}>
+      <View style={styles.header}><Text style={[styles.screenTitle, { color: c.textPrimary }]}>Active DEUR Available</Text><Text style={[styles.screenSubtitle, { color: c.textMuted }]}>Review and resume the turned-over DEUR</Text></View>
+      <SyncBanner status={connectivity} />
+      <View style={[styles.deurNumberBanner, { backgroundColor: c.blue600 }]}>
+        <Text style={[styles.deurNumberLabel, { color: c.blue50 }]}>DEUR Number</Text>
+        <Text style={styles.deurNumberValue}>{deur.deurNumber}</Text>
+      </View>
+      <View style={[styles.infoCard, { backgroundColor: c.surface, borderColor: c.surfaceBorder }]}>
+        <View style={styles.eqRow}><View style={[styles.eqIcon, { backgroundColor: c.blue50 }]}><Gauge size={20} color={c.blue600} strokeWidth={2} /></View><View style={{ flex: 1 }}><Text style={[styles.eqName, { color: c.textPrimary }]}>{equipment.name}</Text><Text style={[styles.eqAsset, { color: c.textMuted }]}>{equipment.assetNumber}</Text></View><StatusChip label="ACTIVE" variant="emerald" /></View>
+        <View style={styles.infoGrid}><InfoItem label="Project" value={project.name} c={c} /><InfoItem label="Rental" value={activeRental.rentalNumber} c={c} /></View>
+      </View>
+      {previousSegment && (
+        <View style={[styles.infoCard, { backgroundColor: c.surface, borderColor: c.surfaceBorder }]}>
+          <Text style={[styles.turnoverLabel, { color: c.textMuted }]}>Turned over by</Text>
+          <Text style={[styles.turnoverName, { color: c.textPrimary }]}>{previousSegment.operatorName}{previousSegment.isReliever ? ' (Reliever)' : ''}</Text>
+          <Text style={[styles.turnoverTime, { color: c.textMuted }]}>{deur.turnoverTimestamp ? new Date(deur.turnoverTimestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '---'}</Text>
+        </View>
+      )}
+      <View style={[styles.statusBanner, { backgroundColor: c.amber50 }]}><Text style={[styles.statusBannerText, { color: c.amber500 }]}>AWAITING RESUME</Text></View>
+      <View style={styles.resumeActions}>
+        <Button label="REVIEW ACTIVE DEUR" onPress={() => router.push(`/deur-summary/${deur.id}`)} variant="secondary" style={styles.cta} />
+        <Button label="RESUME OPERATION" onPress={() => setShowResumeConfirm(true)} style={styles.cta} />
+      </View>
+      <ConfirmDialog visible={showResumeConfirm} title="Resume Operation?" message="You will continue this active DEUR. A new operator segment will begin and you can select your activity." confirmLabel="Resume" onConfirm={handleResume} onCancel={() => setShowResumeConfirm(false)} />
+    </ScrollView>
+  );
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <SyncBanner status={connectivity} />
-
-      {/* Header info */}
-      <Card style={styles.infoCard}>
-        <View style={styles.equipmentRow}>
-          <View style={styles.equipmentIcon}>
-            <Truck size={20} color={colors.blue600} strokeWidth={2} />
+    <View style={[styles.container, { backgroundColor: c.background, paddingTop: insets.top }]}>
+      <View style={styles.hmiContainer}>
+        {/* HEADER */}
+        <View style={[styles.hmiHeader, { backgroundColor: c.surface, borderBottomColor: c.surfaceBorder }]}>
+          <View style={{ flex: 1, gap: 1 }}>
+            <Text style={[styles.hmiDeurNumber, { color: c.blue600 }]}>{deur.deurNumber}</Text>
+            <Text style={[styles.hmiEquipment, { color: c.textPrimary }]} numberOfLines={1}>{equipment.name}</Text>
+            <Text style={[styles.hmiAsset, { color: c.textMuted }]}>{equipment.assetNumber} • {operator.name}{operator.isReliever ? ' (Reliever)' : ''}</Text>
           </View>
-          <View style={styles.equipmentInfo}>
-            <Text style={styles.equipmentName}>{equipment.name}</Text>
-            <Text style={styles.assetNumber}>{equipment.assetNumber} • {activeRental.rentalNumber}</Text>
-          </View>
-          <StatusChip
-            label={deur.status.toUpperCase()}
-            variant={isActive ? 'emerald' : deur.status === 'Submitted' || deur.status === 'Acknowledged' ? 'blue' : deur.status === 'Rejected' ? 'red' : 'amber'}
-          />
-        </View>
-        <View style={styles.infoGrid}>
-          <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>Project</Text>
-            <Text style={styles.infoValue}>{project.name}</Text>
-          </View>
-          <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>Billing</Text>
-            <Text style={styles.infoValue}>{activeRental.billingMethod}</Text>
-          </View>
-          <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>Date</Text>
-            <Text style={styles.infoValue}>{formatDate(deur.date)}</Text>
-          </View>
-          <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>Shift Start</Text>
-            <Text style={styles.infoValue}>{deur.shiftStart ? formatTime(deur.shiftStart) : '---'}</Text>
+          <View style={styles.hmiHeaderRight}>
+            <StatusChip label={deur.status.toUpperCase()} variant={getStatusVariant(deur.status)} />
+            {isActive && <TouchableOpacity onPress={() => setDrawerVisible(true)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}><View style={[styles.menuButton, { backgroundColor: c.blue50 }]}><MenuIcon size={20} color={c.blue600} strokeWidth={2} /></View></TouchableOpacity>}
           </View>
         </View>
-      </Card>
 
-      {/* Operator Segments / Audit Trail */}
-      {deur.operatorSegments.length > 0 && (
-        <>
-          <Text style={styles.sectionLabel}>OPERATOR SCHEDULE</Text>
-          <Card style={styles.timelineCard}>
-            {deur.operatorSegments.map((seg, idx) => (
-              <View key={seg.id} style={styles.timelineItem}>
-                <View style={[styles.timelineDot, { backgroundColor: seg.isReliever ? colors.amber500 : colors.blue600 }]} />
-                {idx < deur.operatorSegments.length - 1 && <View style={styles.timelineLine} />}
-                <View style={styles.timelineContent}>
-                  <Text style={styles.timelineActivity}>{seg.operatorName}{seg.isReliever ? ' (Reliever)' : ''}</Text>
-                  <Text style={styles.timelineTime}>
-                    {formatTime(seg.startTime)} – {seg.endTime ? formatTime(seg.endTime) : 'Active'}
-                  </Text>
-                </View>
-              </View>
-            ))}
-          </Card>
-        </>
-      )}
-
-      {/* Current Activity Card */}
-      {currentActivity && isActive && (
-        <Card style={[styles.currentActivityCard, { borderColor: currentActivity.activity === 'Breakdown' ? colors.red500 : currentActivity.activity === 'Waiting' ? colors.amber500 : colors.emerald500 }] as unknown as ViewStyle}>
-          <Text style={styles.currentActivityLabel}>CURRENT ACTIVITY</Text>
-          <Text style={[styles.currentActivityName, { color: currentActivity.activity === 'Breakdown' ? colors.red500 : currentActivity.activity === 'Waiting' ? colors.amber500 : colors.emerald500 }]}>
-            {currentActivity.activity.toUpperCase()}
-          </Text>
-          {currentActivity.reason && (
-            <Text style={styles.currentActivityReason}>{currentActivity.reason}</Text>
-          )}
-          {currentActivity.category && (
-            <Text style={styles.currentActivityReason}>{currentActivity.category}</Text>
-          )}
-          <View style={styles.runningRow}>
-            <View style={styles.runningDot} />
-            <Text style={styles.runningText}>Running for</Text>
-            <Text style={styles.runningDuration}>
-              {formatDuration(Date.now() - new Date(currentActivity.startTime).getTime())}
-            </Text>
-          </View>
-        </Card>
-      )}
-
-      {/* Activity Buttons */}
-      {isActive && (
-        <>
-          <Text style={styles.sectionLabel}>SELECT ACTIVITY</Text>
-          <View style={styles.activityGrid}>
-            {ACTIVITIES.map((act) => {
-              const isCurrent = currentActivity?.activity === act.type;
-              return (
-                <TouchableOpacity
-                  key={act.type}
-                  onPress={() => handleActivityPress(act.type)}
-                  style={[
-                    styles.activityButton,
-                    {
-                      backgroundColor: isCurrent ? act.color : act.bgColor,
-                      borderColor: isCurrent ? act.color : colors.slate200,
-                    },
-                  ]}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.activityButtonText,
-                      { color: isCurrent ? colors.white : act.color },
-                    ]}
-                  >
-                    {act.type}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </>
-      )}
-
-      {/* Time Metrics */}
-      <Text style={styles.sectionLabel}>TIME SUMMARY</Text>
-      <Card style={styles.totalsCard}>
-        <View style={styles.metricRow}>
-          <Text style={styles.metricLabel}>Net Operating Time</Text>
-          <Text style={styles.metricValue}>{formatDuration(netOp)}</Text>
-        </View>
-        <View style={styles.metricDivider} />
-        <View style={styles.metricRow}>
-          <Text style={styles.metricLabel}>Gross Productive Time</Text>
-          <Text style={styles.metricValue}>{formatDuration(grossProd)}</Text>
-        </View>
-        <View style={styles.metricDivider} />
-        <View style={styles.metricRow}>
-          <Text style={styles.metricLabel}>Total Shift Time</Text>
-          <Text style={styles.metricValue}>{formatDuration(totalShift)}</Text>
-        </View>
-      </Card>
-
-      {/* Activity Breakdown */}
-      <Text style={styles.sectionLabel}>ACTIVITY BREAKDOWN</Text>
-      <Card style={styles.totalsCard}>
-        {ACTIVITIES.map((act) => {
-          const total = totals[act.type];
-          const pct = totalShift > 0 ? (total / totalShift) * 100 : 0;
-          return (
-            <View key={act.type} style={styles.totalRow}>
-              <View style={styles.totalRowHeader}>
-                <Text style={styles.totalRowLabel}>{act.type}</Text>
-                <Text style={styles.totalRowValue}>{formatDuration(total)}</Text>
-              </View>
-              <View style={styles.totalBarBg}>
-                <View style={[styles.totalBar, { width: `${pct}%`, backgroundColor: act.color }]} />
-              </View>
+        {isSubmitted ? (
+          <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, gap: spacing.md }}>
+            <View style={[styles.submittedBanner, { backgroundColor: c.blue50 }]}><Text style={[styles.submittedText, { color: c.blue600 }]}>{deur.status === 'Acknowledged' ? 'DEUR Acknowledged' : 'DEUR Submitted — Awaiting Acknowledgement'}</Text></View>
+            <View style={[styles.infoCard, { backgroundColor: c.surface, borderColor: c.surfaceBorder }]}><View style={styles.infoGrid}><InfoItem label="Net Operating" value={formatDuration(netOp)} c={c} /><InfoItem label="Total Shift" value={formatDuration(totalShift)} c={c} /></View></View>
+            <Button label="VIEW SUMMARY" onPress={() => router.push(`/deur-summary/${deur.id}`)} variant="secondary" />
+            {assignment?.status === 'Active' && <Button label="START NEW DEUR" onPress={() => setShowStartConfirm(true)} />}
+            <ConfirmDialog visible={showStartConfirm} title="Start New DEUR?" message="This will create a new DEUR record for today." confirmLabel="Start" onConfirm={handleStart} onCancel={() => setShowStartConfirm(false)} />
+          </ScrollView>
+        ) : deur.status === 'Ended' ? (
+          <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, gap: spacing.md, justifyContent: 'center' }}>
+            <View style={[styles.endedBanner, { backgroundColor: c.amber50 }]}><Text style={[styles.endedText, { color: c.amber500 }]}>Shift Ended</Text><Text style={[styles.endedSub, { color: c.textMuted }]}>Review and submit your DEUR</Text></View>
+            <View style={[styles.infoCard, { backgroundColor: c.surface, borderColor: c.surfaceBorder }]}><View style={styles.infoGrid}><InfoItem label="Net Operating" value={formatDuration(netOp)} c={c} /><InfoItem label="Total Shift" value={formatDuration(totalShift)} c={c} /></View></View>
+            <Button label="REVIEW & SUBMIT" onPress={() => router.push(`/deur-summary/${deur.id}`)} />
+          </ScrollView>
+        ) : deur.status === 'Rejected' ? (
+          <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, gap: spacing.md }}>
+            <View style={[styles.rejectedBanner, { backgroundColor: c.dangerBg }]}><AlertTriangle size={20} color={c.red500} strokeWidth={2} /><Text style={[styles.rejectedText, { color: c.red500 }]}>DEUR Rejected</Text></View>
+            {deur.rejectionReason && <Text style={[styles.rejectionReason, { color: c.textMuted }]}>{deur.rejectionReason}</Text>}
+            <Button label="VIEW SUMMARY" onPress={() => router.push(`/deur-summary/${deur.id}`)} variant="secondary" />
+            <Button label="START NEW DEUR" onPress={() => setShowStartConfirm(true)} />
+            <ConfirmDialog visible={showStartConfirm} title="Start New DEUR?" message="This will create a new DEUR record for today." confirmLabel="Start" onConfirm={handleStart} onCancel={() => setShowStartConfirm(false)} />
+          </ScrollView>
+        ) : (
+          /* ACTIVE HMI */
+          <View style={styles.hmiBody}>
+            <View style={[styles.currentBox, { backgroundColor: c.surface, borderColor: currentColor }]}>
+              <Text style={[styles.currentLabel, { color: c.textMuted }]}>CURRENT ACTIVITY</Text>
+              <Text style={[styles.currentName, { color: currentColor }]}>{currentActivity ? currentActivity.activity.toUpperCase() : 'IDLE'}</Text>
+              {currentReason ? <Text style={[styles.currentReason, { color: c.textSecondary }]}>{currentReason}</Text> : null}
+              <Text style={[styles.currentDuration, { color: c.textPrimary }]}>{currentActivity ? formatDuration(Date.now() - new Date(currentActivity.startTime).getTime()) : '00:00:00'}</Text>
             </View>
-          );
-        })}
-      </Card>
 
-      {/* Activity Timeline */}
-      <Text style={styles.sectionLabel}>ACTIVITY TIMELINE</Text>
-      <Card style={styles.timelineCard}>
-        {deur.activities.map((event, idx) => (
-          <View key={event.id} style={styles.timelineItem}>
-            <View style={[styles.timelineDot, { backgroundColor: getActivityColor(event.activity) }]} />
-            {idx < deur.activities.length - 1 && <View style={styles.timelineLine} />}
-            <View style={styles.timelineContent}>
-              <Text style={styles.timelineActivity}>{event.activity}</Text>
-              {event.reason && <Text style={styles.timelineReason}>{event.reason}</Text>}
-              {event.category && <Text style={styles.timelineReason}>{event.category}</Text>}
-              <Text style={styles.timelineTime}>
-                {formatTime(event.startTime)} – {event.endTime ? formatTime(event.endTime) : 'Current'}
-              </Text>
+            <View style={styles.activityGrid}>
+              {ACTS.map((act) => {
+                const isCur = currentActivity?.activity === act.type;
+                return <TouchableOpacity key={act.type} onPress={() => handleActivity(act.type)} style={[styles.actBtn, { backgroundColor: isCur ? act.color : c[act.bgKey], borderColor: isCur ? act.color : c.surfaceBorder }]} activeOpacity={0.7}><Text style={[styles.actBtnText, { color: isCur ? c.white : act.color }]}>{act.type}</Text></TouchableOpacity>;
+              })}
+            </View>
+
+            <View style={[styles.metricsRow, { backgroundColor: c.surface, borderColor: c.surfaceBorder }]}>
+              <View style={styles.metricBox}><Text style={[styles.metricLabel, { color: c.textMuted }]}>Net Operating</Text><Text style={[styles.metricValue, { color: c.emerald500 }]}>{formatDuration(netOp)}</Text></View>
+              <View style={[styles.metricDivider, { backgroundColor: c.surfaceBorder }]} />
+              <View style={styles.metricBox}><Text style={[styles.metricLabel, { color: c.textMuted }]}>Total Shift</Text><Text style={[styles.metricValue, { color: c.blue600 }]}>{formatDuration(totalShift)}</Text></View>
+            </View>
+
+            <View style={styles.quickActions}>
+              <TouchableOpacity style={[styles.quickBtn, { backgroundColor: c.emerald50, borderColor: c.emerald500 }]} onPress={() => router.push(`/deur-travel/${deur.id}`)} activeOpacity={0.7}><Navigation size={16} color={c.emerald500} strokeWidth={2} /><Text style={[styles.quickBtnText, { color: c.emerald500 }]}>TRAVEL</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.quickBtn, { backgroundColor: c.blue50, borderColor: c.blue600 }]} onPress={() => router.push(`/deur-fuel/${deur.id}`)} activeOpacity={0.7}><Fuel size={16} color={c.blue600} strokeWidth={2} /><Text style={[styles.quickBtnText, { color: c.blue600 }]}>FUEL</Text></TouchableOpacity>
+            </View>
+
+            <View style={styles.bottomActions}>
+              <TouchableOpacity style={[styles.turnOverBtn, { backgroundColor: c.blue50, borderColor: c.blue600 }]} onPress={() => setShowTurnOverConfirm(true)} activeOpacity={0.7}><Users size={18} color={c.blue600} strokeWidth={2} /><Text style={[styles.turnOverText, { color: c.blue600 }]}>TURN OVER</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.endShiftBtn, { backgroundColor: c.red500 }]} onPress={() => setShowEndConfirm(true)} activeOpacity={0.7}><Square size={18} color={c.white} strokeWidth={2} fill={c.white} /><Text style={[styles.endShiftText, { color: c.white }]}>END SHIFT</Text></TouchableOpacity>
             </View>
           </View>
-        ))}
-      </Card>
-
-      {/* Quick action buttons */}
-      <View style={styles.quickActions}>
-        <TouchableOpacity
-          style={styles.quickAction}
-          onPress={() => router.push(`/deur-meter/${deur.id}`)}
-          disabled={!isActive && deur.status !== 'Ended'}
-        >
-          <Gauge size={20} color={colors.blue600} strokeWidth={2} />
-          <Text style={styles.quickActionLabel}>Meter</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.quickAction}
-          onPress={() => router.push(`/deur-fuel/${deur.id}`)}
-          disabled={!isActive}
-        >
-          <Fuel size={20} color={colors.blue600} strokeWidth={2} />
-          <Text style={styles.quickActionLabel}>Fuel</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.quickAction}
-          onPress={() => router.push(`/deur-remarks/${deur.id}`)}
-          disabled={!isActive && deur.status !== 'Ended'}
-        >
-          <MessageSquare size={20} color={colors.blue600} strokeWidth={2} />
-          <Text style={styles.quickActionLabel}>Remarks</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.quickAction}
-          onPress={() => router.push(`/deur-travel/${deur.id}`)}
-          disabled={!isActive && deur.status !== 'Ended'}
-        >
-          <Navigation size={20} color={colors.blue600} strokeWidth={2} />
-          <Text style={styles.quickActionLabel}>Travel</Text>
-        </TouchableOpacity>
+        )}
       </View>
 
-      {/* Fuel entries summary */}
-      {deur.fuelEntries.length > 0 && (
-        <>
-          <Text style={styles.sectionLabel}>FUEL ENTRIES</Text>
-          <Card style={styles.fuelCard}>
-            {deur.fuelEntries.map((f) => (
-              <View key={f.id} style={styles.fuelRow}>
-                <Fuel size={16} color={colors.blue600} strokeWidth={2} />
-                <Text style={styles.fuelQty}>{f.quantity} L</Text>
-                {f.gaugeLevel && <Text style={styles.fuelGauge}>{f.gaugeLevel}</Text>}
-                <Text style={styles.fuelTime}>{formatTime(f.timestamp)}</Text>
-                {f.remarks ? <Text style={styles.fuelRemarks}>{f.remarks}</Text> : null}
-              </View>
-            ))}
-          </Card>
-        </>
-      )}
+      <DeurDetailsDrawer visible={drawerVisible} deur={deur} onClose={() => setDrawerVisible(false)} onNavigate={(r) => { setDrawerVisible(false); router.push(r as never); }} />
+      <ConfirmDialog visible={showEndConfirm} title="End Shift?" message="This will stop the current activity and end your shift. You will be taken to the DEUR summary for review." confirmLabel="End Shift" onConfirm={handleEndShift} onCancel={() => setShowEndConfirm(false)} danger />
+      <ConfirmDialog visible={showTurnOverConfirm} title="Turn Over Shift?" message="Your segment will end and the DEUR will remain active. Another operator will log in to continue this same DEUR." confirmLabel="Turn Over" onConfirm={handleTurnOver} onCancel={() => setShowTurnOverConfirm(false)} />
 
-      {/* End Shift / Turn Over / Review / Submit */}
-      {isActive && (
-        <>
-          <TouchableOpacity
-            style={styles.turnOverButton}
-            onPress={() => setShowTurnOverConfirm(true)}
-            activeOpacity={0.7}
-          >
-            <Users size={20} color={colors.blue600} strokeWidth={2} />
-            <Text style={styles.turnOverText}>TURN OVER TO RELIEVER</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.endShiftButton}
-            onPress={() => setShowEndConfirm(true)}
-            activeOpacity={0.7}
-          >
-            <Square size={20} color={colors.white} strokeWidth={2} fill={colors.white} />
-            <Text style={styles.endShiftText}>END SHIFT</Text>
-          </TouchableOpacity>
-
-          <ConfirmDialog
-            visible={showEndConfirm}
-            title="End Shift?"
-            message="This will stop the current activity and end your shift. You will be taken to the DEUR summary for review."
-            confirmLabel="End Shift"
-            onConfirm={handleEndShift}
-            onCancel={() => setShowEndConfirm(false)}
-            danger
-          />
-
-          <ConfirmDialog
-            visible={showTurnOverConfirm}
-            title="Turn Over to Reliever?"
-            message="Your segment will end and the DEUR will remain active. The reliever will log in with their PIN to continue this DEUR."
-            confirmLabel="Turn Over"
-            onConfirm={handleTurnOver}
-            onCancel={() => setShowTurnOverConfirm(false)}
-          />
-        </>
-      )}
-
-      {deur.status === 'Ended' && (
-        <Button
-          label="REVIEW & SUBMIT DEUR"
-          onPress={() => router.push(`/deur-summary/${deur.id}`)}
-          style={styles.ctaButton}
-        />
-      )}
-
-      {(deur.status === 'Submitted' || deur.status === 'Acknowledged') && (
-        <Card style={styles.submittedCard}>
-          <View style={styles.submittedRow}>
-            <Text style={styles.submittedText}>
-              {deur.status === 'Acknowledged' ? 'DEUR Acknowledged' : 'DEUR Submitted — Awaiting Acknowledgement'}
-            </Text>
-          </View>
-          <Button
-            label="VIEW SUMMARY"
-            onPress={() => router.push(`/deur-summary/${deur.id}`)}
-            variant="secondary"
-          />
-          <Button
-            label="START NEW DEUR"
-            onPress={() => setShowStartConfirm(true)}
-            style={styles.ctaButton}
-          />
-        </Card>
-      )}
-
-      {deur.status === 'Rejected' && (
-        <Card style={styles.submittedCard}>
-          <View style={styles.submittedRow}>
-            <AlertTriangle size={20} color={colors.red500} strokeWidth={2} />
-            <Text style={styles.submittedText}>DEUR Rejected</Text>
-            {deur.rejectionReason && <Text style={styles.rejectionReason}>{deur.rejectionReason}</Text>}
-          </View>
-          <Button
-            label="VIEW SUMMARY"
-            onPress={() => router.push(`/deur-summary/${deur.id}`)}
-            variant="secondary"
-          />
-          <Button
-            label="START NEW DEUR"
-            onPress={() => setShowStartConfirm(true)}
-            style={styles.ctaButton}
-          />
-        </Card>
-      )}
-
-      {/* Waiting Reason Modal */}
-      <Modal visible={waitingModalVisible} transparent animationType="fade" onRequestClose={() => setWaitingModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Select Waiting Reason</Text>
-            <ScrollView style={styles.reasonList}>
-              {waitingReasons.map((r) => (
-                <TouchableOpacity
-                  key={r.id}
-                  style={styles.reasonItem}
-                  onPress={() => handleWaitingReasonSelect(r.label)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.reasonItemText}>{r.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <Button label="Cancel" onPress={() => setWaitingModalVisible(false)} variant="ghost" />
-          </View>
-        </View>
+      <Modal visible={waitingModal} transparent animationType="fade" onRequestClose={() => setWaitingModal(false)}>
+        <View style={[styles.modalOverlay, { backgroundColor: c.overlay }]}><View style={[styles.modalContent, { backgroundColor: c.surface }]}>
+          <Text style={[styles.modalTitle, { color: c.textPrimary }]}>Select Waiting Reason</Text>
+          <ScrollView style={styles.reasonList}>{waitingReasons.map((r) => <TouchableOpacity key={r.id} style={[styles.reasonItem, { borderBottomColor: c.slate100 }]} onPress={() => handleWaitingReason(r.label)} activeOpacity={0.7}><Text style={[styles.reasonItemText, { color: c.textPrimary }]}>{r.label}</Text></TouchableOpacity>)}</ScrollView>
+          <Button label="Cancel" onPress={() => setWaitingModal(false)} variant="ghost" />
+        </View></View>
       </Modal>
 
-      {/* Breakdown Category Modal */}
-      <Modal visible={breakdownModalVisible} transparent animationType="fade" onRequestClose={() => setBreakdownModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Select Breakdown Category</Text>
-            <ScrollView style={styles.reasonList}>
-              {breakdownCategories.map((c) => (
-                <TouchableOpacity
-                  key={c.id}
-                  style={styles.reasonItem}
-                  onPress={() => handleBreakdownCategorySelect(c.label)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.reasonItemText}>{c.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <View style={styles.modalField}>
-              <Text style={styles.modalFieldLabel}>Optional Remarks</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={breakdownRemarks}
-                onChangeText={setBreakdownRemarks}
-                placeholder="Describe the issue..."
-                placeholderTextColor={colors.slate400}
-                multiline
-                numberOfLines={2}
-                textAlignVertical="top"
-              />
-            </View>
-            <Button label="Cancel" onPress={() => setBreakdownModalVisible(false)} variant="ghost" />
-          </View>
-        </View>
+      <Modal visible={breakdownModal} transparent animationType="fade" onRequestClose={() => setBreakdownModal(false)}>
+        <View style={[styles.modalOverlay, { backgroundColor: c.overlay }]}><View style={[styles.modalContent, { backgroundColor: c.surface }]}>
+          <Text style={[styles.modalTitle, { color: c.textPrimary }]}>Select Breakdown Category</Text>
+          <ScrollView style={styles.reasonList}>{breakdownCats.map((cat) => <TouchableOpacity key={cat.id} style={[styles.reasonItem, { borderBottomColor: c.slate100 }]} onPress={() => handleBreakdownCat(cat.label)} activeOpacity={0.7}><Text style={[styles.reasonItemText, { color: c.textPrimary }]}>{cat.label}</Text></TouchableOpacity>)}</ScrollView>
+          <View style={styles.modalField}><Text style={[styles.modalFieldLabel, { color: c.textSecondary }]}>Optional Remarks</Text><TextInput style={[styles.modalInput, { backgroundColor: c.inputBg, borderColor: c.inputBorder, color: c.textPrimary }]} value={breakdownRemarks} onChangeText={setBreakdownRemarks} placeholder="Describe the issue..." placeholderTextColor={c.textMuted} multiline numberOfLines={2} textAlignVertical="top" /></View>
+          <Button label="Cancel" onPress={() => setBreakdownModal(false)} variant="ghost" />
+        </View></View>
       </Modal>
-    </ScrollView>
+    </View>
   );
 }
 
+function InfoItem({ label, value, c }: { label: string; value: string; c: ThemeColors }) {
+  return <View style={styles.infoItem}><Text style={[styles.infoLabel, { color: c.textMuted }]}>{label}</Text><Text style={[styles.infoValue, { color: c.textPrimary }]}>{value}</Text></View>;
+}
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.slate50,
-  },
-  content: {
-    padding: spacing.lg,
-    gap: spacing.md,
-    paddingBottom: spacing.xxxl + 60,
-  },
-  centerContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.slate50,
-    padding: spacing.xl,
-  },
-  emptyText: {
-    fontFamily: fonts.medium,
-    fontSize: 15,
-    color: colors.slate500,
-  },
-  header: {
-    gap: 4,
-    marginBottom: spacing.sm,
-  },
-  screenTitle: {
-    fontFamily: fonts.extrabold,
-    fontSize: 24,
-    color: colors.slate900,
-  },
-  screenSubtitle: {
-    fontFamily: fonts.medium,
-    fontSize: 13,
-    color: colors.slate500,
-  },
-  infoCard: {
-    gap: spacing.md,
-  },
-  equipmentRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  equipmentIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.sm,
-    backgroundColor: colors.blue50,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  equipmentInfo: {
-    flex: 1,
-  },
-  equipmentName: {
-    fontFamily: fonts.bold,
-    fontSize: 15,
-    color: colors.slate900,
-  },
-  assetNumber: {
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    color: colors.slate500,
-  },
-  infoGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.md,
-  },
-  infoItem: {
-    flexBasis: '47%',
-    gap: 2,
-  },
-  infoLabel: {
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    color: colors.slate500,
-  },
-  infoValue: {
-    fontFamily: fonts.bold,
-    fontSize: 13,
-    color: colors.slate900,
-  },
-  meterCard: {
-    gap: 8,
-  },
-  meterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  meterLabel: {
-    flex: 1,
-    fontFamily: fonts.medium,
-    fontSize: 13,
-    color: colors.slate700,
-  },
-  meterValue: {
-    fontFamily: fonts.bold,
-    fontSize: 15,
-    color: colors.slate900,
-  },
-  startSection: {
-    gap: 12,
-    alignItems: 'center',
-    paddingVertical: spacing.xl,
-  },
-  startHint: {
-    fontFamily: fonts.bold,
-    fontSize: 16,
-    color: colors.slate900,
-    textAlign: 'center',
-  },
-  startHintSub: {
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    color: colors.slate500,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  ctaButton: {
-    width: '100%',
-  },
-  sectionLabel: {
-    fontFamily: fonts.extrabold,
-    fontSize: 13,
-    color: colors.slate500,
-    marginTop: spacing.sm,
-    letterSpacing: 0.5,
-  },
-  currentActivityCard: {
-    borderWidth: 2,
-    gap: 8,
-    alignItems: 'center',
-    paddingVertical: spacing.xl,
-  },
-  currentActivityLabel: {
-    fontFamily: fonts.extrabold,
-    fontSize: 11,
-    color: colors.slate500,
-    letterSpacing: 1,
-  },
-  currentActivityName: {
-    fontFamily: fonts.extrabold,
-    fontSize: 28,
-  },
-  currentActivityReason: {
-    fontFamily: fonts.semibold,
-    fontSize: 14,
-    color: colors.slate700,
-  },
-  runningRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  runningDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.emerald500,
-  },
-  runningText: {
-    fontFamily: fonts.medium,
-    fontSize: 13,
-    color: colors.slate500,
-  },
-  runningDuration: {
-    fontFamily: fonts.bold,
-    fontSize: 15,
-    color: colors.slate900,
-  },
-  activityGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.md,
-  },
-  activityButton: {
-    flexBasis: '47%',
-    flexGrow: 1,
-    minHeight: 64,
-    borderRadius: radius.md,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  activityButtonText: {
-    fontFamily: fonts.bold,
-    fontSize: 16,
-  },
-  totalsCard: {
-    gap: 12,
-  },
-  metricRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 4,
-  },
-  metricLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 14,
-    color: colors.slate700,
-  },
-  metricValue: {
-    fontFamily: fonts.bold,
-    fontSize: 15,
-    color: colors.slate900,
-  },
-  metricDivider: {
-    height: 1,
-    backgroundColor: colors.slate100,
-  },
-  totalRow: {
-    gap: 6,
-  },
-  totalRowHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  totalRowLabel: {
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    color: colors.slate900,
-  },
-  totalRowValue: {
-    fontFamily: fonts.bold,
-    fontSize: 13,
-    color: colors.slate900,
-  },
-  totalBarBg: {
-    height: 6,
-    backgroundColor: colors.slate200,
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  totalBar: {
-    height: 6,
-    borderRadius: 3,
-  },
-  timelineCard: {
-    gap: 0,
-    padding: 16,
-  },
-  timelineItem: {
-    flexDirection: 'row',
-    gap: 12,
-    minHeight: 40,
-  },
-  timelineDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginTop: 4,
-  },
-  timelineLine: {
-    position: 'absolute',
-    left: 5,
-    top: 16,
-    width: 2,
-    bottom: -16,
-    backgroundColor: colors.slate200,
-  },
-  timelineContent: {
-    flex: 1,
-    paddingBottom: 12,
-  },
-  timelineActivity: {
-    fontFamily: fonts.bold,
-    fontSize: 13,
-    color: colors.slate900,
-  },
-  timelineReason: {
-    fontFamily: fonts.medium,
-    fontSize: 12,
-    color: colors.slate500,
-    marginTop: 2,
-  },
-  timelineTime: {
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    color: colors.slate500,
-    marginTop: 2,
-  },
-  quickActions: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    marginTop: spacing.sm,
-  },
-  quickAction: {
-    flex: 1,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.slate200,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    alignItems: 'center',
-    gap: 6,
-    minHeight: 64,
-    justifyContent: 'center',
-  },
-  quickActionLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 13,
-    color: colors.slate900,
-  },
-  fuelCard: {
-    gap: 8,
-  },
-  fuelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  fuelQty: {
-    fontFamily: fonts.bold,
-    fontSize: 13,
-    color: colors.slate900,
-  },
-  fuelGauge: {
-    fontFamily: fonts.medium,
-    fontSize: 12,
-    color: colors.blue600,
-  },
-  fuelTime: {
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    color: colors.slate500,
-  },
-  fuelRemarks: {
-    flex: 1,
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    color: colors.slate500,
-    fontStyle: 'italic',
-  },
-  turnOverButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: colors.blue50,
-    borderRadius: radius.md,
-    paddingVertical: spacing.md + 2,
-    minHeight: 56,
-    marginTop: spacing.sm,
-    borderWidth: 1.5,
-    borderColor: colors.blue600,
-  },
-  turnOverText: {
-    fontFamily: fonts.bold,
-    fontSize: 16,
-    color: colors.blue600,
-  },
-  endShiftButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: colors.red500,
-    borderRadius: radius.md,
-    paddingVertical: spacing.md + 2,
-    minHeight: 56,
-    marginTop: spacing.sm,
-  },
-  endShiftText: {
-    fontFamily: fonts.bold,
-    fontSize: 16,
-    color: colors.white,
-  },
-  submittedCard: {
-    gap: 12,
-    alignItems: 'center',
-  },
-  submittedRow: {
-    alignItems: 'center',
-    gap: 4,
-  },
-  submittedText: {
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    color: colors.slate500,
-    textAlign: 'center',
-  },
-  rejectionReason: {
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    color: colors.red500,
-    textAlign: 'center',
-    marginTop: 4,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.xl,
-  },
-  modalContent: {
-    backgroundColor: colors.white,
-    borderRadius: radius.xxl,
-    padding: spacing.xl,
-    width: '100%',
-    maxWidth: 360,
-    gap: spacing.md,
-  },
-  modalTitle: {
-    fontFamily: fonts.extrabold,
-    fontSize: 18,
-    color: colors.slate900,
-    textAlign: 'center',
-  },
-  reasonList: {
-    maxHeight: 300,
-  },
-  reasonItem: {
-    paddingVertical: spacing.md + 2,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.slate100,
-    minHeight: 52,
-    justifyContent: 'center',
-  },
-  reasonItemText: {
-    fontFamily: fonts.semibold,
-    fontSize: 15,
-    color: colors.slate900,
-  },
-  modalField: {
-    gap: 6,
-  },
-  modalFieldLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 13,
-    color: colors.slate700,
-  },
-  modalInput: {
-    backgroundColor: colors.slate50,
-    borderWidth: 1.5,
-    borderColor: colors.slate200,
-    borderRadius: radius.md,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    color: colors.slate900,
-    minHeight: 60,
-  },
+  container: { flex: 1 }, content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxxl + 60 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
+  emptyText: { fontFamily: 'Manrope-Medium', fontSize: 15 },
+  header: { gap: 4, marginBottom: spacing.sm },
+  screenTitle: { fontFamily: 'Manrope-ExtraBold', fontSize: 24 },
+  screenSubtitle: { fontFamily: 'Manrope-Medium', fontSize: 13 },
+  infoCard: { borderRadius: radius.lg, borderWidth: 1, padding: spacing.md, gap: spacing.md },
+  eqRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  eqIcon: { width: 44, height: 44, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
+  eqName: { fontFamily: 'Manrope-Bold', fontSize: 15 },
+  eqAsset: { fontFamily: 'Manrope-Regular', fontSize: 12 },
+  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
+  infoItem: { flexBasis: '47%', gap: 2 },
+  infoLabel: { fontFamily: 'Manrope-Regular', fontSize: 12 },
+  infoValue: { fontFamily: 'Manrope-Bold', fontSize: 13 },
+  meterCard: { borderRadius: radius.lg, borderWidth: 1, padding: spacing.md, gap: 8 },
+  meterRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  meterLabel: { flex: 1, fontFamily: 'Manrope-Medium', fontSize: 13 },
+  meterValue: { fontFamily: 'Manrope-Bold', fontSize: 15 },
+  startSection: { gap: 12, alignItems: 'center', paddingVertical: spacing.xl },
+  startHint: { fontFamily: 'Manrope-Bold', fontSize: 16, textAlign: 'center' },
+  startHintSub: { fontFamily: 'Manrope-Regular', fontSize: 13, textAlign: 'center', lineHeight: 20 },
+  cta: { width: '100%' },
+  resumeActions: { gap: 12, alignItems: 'center', paddingVertical: spacing.md },
+  deurNumberBanner: { borderRadius: radius.lg, paddingVertical: spacing.md, paddingHorizontal: spacing.lg, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  deurNumberLabel: { fontFamily: 'Manrope-SemiBold', fontSize: 13 },
+  deurNumberValue: { fontFamily: 'Manrope-ExtraBold', fontSize: 18, color: '#ffffff' },
+  turnoverLabel: { fontFamily: 'Manrope-Regular', fontSize: 12 },
+  turnoverName: { fontFamily: 'Manrope-Bold', fontSize: 15, marginTop: 2 },
+  turnoverTime: { fontFamily: 'Manrope-Regular', fontSize: 13, marginTop: 2 },
+  statusBanner: { borderRadius: radius.md, paddingVertical: spacing.md + 4, paddingHorizontal: spacing.lg, alignItems: 'center' },
+  statusBannerText: { fontFamily: 'Manrope-ExtraBold', fontSize: 14, letterSpacing: 1 },
+  hmiContainer: { flex: 1 },
+  hmiHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderBottomWidth: 1, gap: 8 },
+  hmiDeurNumber: { fontFamily: 'Manrope-ExtraBold', fontSize: 16 },
+  hmiEquipment: { fontFamily: 'Manrope-Bold', fontSize: 13 },
+  hmiAsset: { fontFamily: 'Manrope-Regular', fontSize: 11 },
+  hmiHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  menuButton: { width: 36, height: 36, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
+  hmiBody: { flex: 1, padding: spacing.md, gap: spacing.md, justifyContent: 'space-between', paddingBottom: spacing.xl + 24 },
+  currentBox: { borderRadius: radius.lg, borderWidth: 2, paddingVertical: spacing.lg, alignItems: 'center', gap: 4 },
+  currentLabel: { fontFamily: 'Manrope-ExtraBold', fontSize: 11, letterSpacing: 1 },
+  currentName: { fontFamily: 'Manrope-ExtraBold', fontSize: 24 },
+  currentReason: { fontFamily: 'Manrope-SemiBold', fontSize: 13 },
+  currentDuration: { fontFamily: 'Manrope-ExtraBold', fontSize: 32, marginTop: 4 },
+  activityGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  actBtn: { flexBasis: '48%', minHeight: 56, borderRadius: radius.md, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  actBtnText: { fontFamily: 'Manrope-Bold', fontSize: 15 },
+  metricsRow: { flexDirection: 'row', borderRadius: radius.md, borderWidth: 1, paddingVertical: spacing.md },
+  metricBox: { flex: 1, alignItems: 'center', gap: 2 },
+  metricDivider: { width: 1, height: '80%' },
+  metricLabel: { fontFamily: 'Manrope-Regular', fontSize: 12 },
+  metricValue: { fontFamily: 'Manrope-Bold', fontSize: 16 },
+  quickActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs },
+  quickBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: radius.md, paddingVertical: spacing.sm + 2, borderWidth: 1.5, minHeight: 44 },
+  quickBtnText: { fontFamily: 'Manrope-Bold', fontSize: 13 },
+  bottomActions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
+  turnOverBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: radius.md, paddingVertical: spacing.md, minHeight: 52, borderWidth: 1.5 },
+  turnOverText: { fontFamily: 'Manrope-Bold', fontSize: 14 },
+  endShiftBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: radius.md, paddingVertical: spacing.md, minHeight: 52 },
+  endShiftText: { fontFamily: 'Manrope-Bold', fontSize: 14 },
+  submittedBanner: { borderRadius: radius.md, paddingVertical: spacing.md + 4, paddingHorizontal: spacing.lg, alignItems: 'center' },
+  submittedText: { fontFamily: 'Manrope-SemiBold', fontSize: 14 },
+  endedBanner: { borderRadius: radius.md, paddingVertical: spacing.lg, alignItems: 'center', gap: 4 },
+  endedText: { fontFamily: 'Manrope-ExtraBold', fontSize: 18 },
+  endedSub: { fontFamily: 'Manrope-Regular', fontSize: 13 },
+  rejectedBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: radius.md, paddingVertical: spacing.md + 4 },
+  rejectedText: { fontFamily: 'Manrope-SemiBold', fontSize: 14 },
+  rejectionReason: { fontFamily: 'Manrope-Regular', fontSize: 13, textAlign: 'center' },
+  modalOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
+  modalContent: { borderRadius: radius.xxl, padding: spacing.xl, width: '100%', maxWidth: 360, gap: spacing.md },
+  modalTitle: { fontFamily: 'Manrope-ExtraBold', fontSize: 18, textAlign: 'center' },
+  reasonList: { maxHeight: 300 },
+  reasonItem: { paddingVertical: spacing.md + 2, paddingHorizontal: spacing.md, borderRadius: radius.md, borderBottomWidth: 1, minHeight: 52, justifyContent: 'center' },
+  reasonItemText: { fontFamily: 'Manrope-SemiBold', fontSize: 15 },
+  modalField: { gap: 6 },
+  modalFieldLabel: { fontFamily: 'Manrope-SemiBold', fontSize: 13 },
+  modalInput: { borderWidth: 1.5, borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 10, fontFamily: 'Manrope-Regular', fontSize: 14, minHeight: 60 },
 });

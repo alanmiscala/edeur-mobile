@@ -3,10 +3,11 @@ export type DeurStatus =
   | 'Active'
   | 'Ended'
   | 'Submitted'
+  | 'Waiting Acknowledgement'
   | 'Acknowledged'
   | 'Rejected';
 
-export type ActivityType = 'Operating' | 'Waiting' | 'Breakdown';
+export type ActivityType = 'Operating' | 'Waiting' | 'Breakdown' | 'Meal Break';
 
 export type BillingMethod =
   | 'Per Hour'
@@ -17,9 +18,11 @@ export type BillingMethod =
   | 'Per SQM'
   | 'One Lot';
 
-export type FuelGaugeLevel = 'Empty' | '25%' | '50%' | '75%' | 'Full';
+export type FuelGaugeLevel = number; // 0-100 percentage
 
 export type LocationSource = 'GPS' | 'Manual';
+
+export type OperatorType = 'Main Operator' | 'Reliever Operator';
 
 export interface User {
   id: string;
@@ -36,6 +39,16 @@ export interface Operator {
   initials: string;
   pin?: string;
   isReliever?: boolean;
+}
+
+export interface LoginRecord {
+  id: string;
+  deurId: string | null;
+  operatorName: string;
+  operatorType: OperatorType;
+  loginTime: string;
+  logoutTime: string | null;
+  deurNumber: string | null;
 }
 
 export interface Equipment {
@@ -78,13 +91,45 @@ export interface Rental {
   dailyRate: number;
 }
 
-export interface FuelEntry {
+export interface FuelTransaction {
   id: string;
   deurId: string;
-  quantity: number;
-  gaugeLevel?: FuelGaugeLevel;
-  remarks?: string;
   timestamp: string;
+  operatorId: string;
+  operatorName: string;
+  fuelAdded: number;
+  gaugeBefore?: FuelGaugeLevel;
+  gaugeAfter?: FuelGaugeLevel;
+  remarks?: string;
+  fuelSlipNumber?: string;
+  location?: string;
+  hourMeter?: number | null;
+  odometer?: number | null;
+  odometerExceptionReason?: string;
+  odometerExceptionRemarks?: string;
+  operatorSegmentId?: string;
+}
+
+export interface FuelObservation {
+  openingGauge?: FuelGaugeLevel;
+  closingGauge?: FuelGaugeLevel;
+}
+
+export interface TravelCheckpoint {
+  id: string;
+  deurId: string;
+  seq: number;
+  type: 'Initial' | 'Arrival';
+  locationName: string;
+  timestamp: string;
+  gps?: GPSCoordinates;
+  locationSource: LocationSource;
+  odometer?: number | null;
+  odometerExceptionReason?: string;
+  odometerExceptionRemarks?: string;
+  operatorSegmentId: string;
+  operatorDisplayName: string;
+  operatorIsReliever: boolean;
 }
 
 export interface WaitingReasonEntry {
@@ -126,16 +171,51 @@ export interface GPSCoordinates {
   lng: number;
 }
 
+export type OdometerExceptionReason =
+  | 'Odometer Gauge Broken'
+  | 'Odometer Gauge Malfunction'
+  | 'Odometer Not Readable'
+  | 'Instrument Panel Failure'
+  | 'Other';
+
+export const ODOMETER_EXCEPTION_REASONS: OdometerExceptionReason[] = [
+  'Odometer Gauge Broken',
+  'Odometer Gauge Malfunction',
+  'Odometer Not Readable',
+  'Instrument Panel Failure',
+  'Other',
+];
+
+export interface FuelEfficiencyResult {
+  fuelEntry: FuelTransaction;
+  distance: number | null;
+  efficiency: number | null;
+  warning: string | null;
+}
+
+export interface EquipmentMeterState {
+  equipmentId: string;
+  currentHourMeter: number | null;
+  lastUpdatedDeurId: string | null;
+  lastUpdatedTimestamp: string | null;
+}
+
 export interface TravelLocation {
   pointA: string;
   pointB: string;
   source: LocationSource;
   gpsA?: GPSCoordinates;
   gpsB?: GPSCoordinates;
+  startTime?: string;
+  endTime?: string;
+  odometerStart?: number | null;
+  odometerEnd?: number | null;
+  distance?: number | null;
 }
 
 export interface Deur {
   id: string;
+  deurNumber: string;
   operatorId: string;
   equipmentId: string;
   assignmentId: string;
@@ -152,9 +232,14 @@ export interface Deur {
   remarks: string;
   breakdownRemarks: string;
   rejectionReason?: string;
+  submittedAt?: string;
   activities: ActivityEvent[];
-  fuelEntries: FuelEntry[];
+  fuelEntries: FuelTransaction[];
+  fuelObservation?: FuelObservation;
   operatorSegments: OperatorSegment[];
+  travelCheckpoints: TravelCheckpoint[];
   travelLocation?: TravelLocation;
   pendingSync: boolean;
+  turnoverPending?: boolean;
+  turnoverTimestamp?: string;
 }

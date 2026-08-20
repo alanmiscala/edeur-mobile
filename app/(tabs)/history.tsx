@@ -1,19 +1,23 @@
 import { useState, useCallback } from 'react';
 import { StyleSheet, Text, View, ScrollView, RefreshControl, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Search, ChevronRight } from 'lucide-react-native';
-import { colors, fonts, radius, spacing } from '@/lib/theme';
+import { fonts, radius, spacing } from '@/lib/theme';
+import { useTheme } from '@/lib/useTheme';
 import { useAuth } from '@/lib/auth';
 import { mockRepository } from '@/lib/mockRepository';
 import { Card } from '@/components/Card';
 import { StatusChip } from '@/components/StatusChip';
 import { EmptyState } from '@/components/EmptyState';
-import { formatDate, formatDurationShort, getTotalShiftTime, getNetOperatingTime } from '@/lib/utils';
+import { formatDate, formatDurationShort, getTotalShiftTime, getNetOperatingTime, getStatusVariant } from '@/lib/utils';
 import { TouchableOpacity } from 'react-native';
 
 export default function HistoryScreen() {
   const router = useRouter();
   const { operator } = useAuth();
+  const { colors: c } = useTheme();
+  const insets = useSafeAreaInsets();
   const [search, setSearch] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
@@ -40,19 +44,19 @@ export default function HistoryScreen() {
 
   return (
     <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
+      style={[styles.container, { backgroundColor: c.background }]}
+      contentContainerStyle={[styles.content, { paddingTop: spacing.lg + insets.top, paddingBottom: spacing.xxxl + 80 + insets.bottom }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
-      <Text style={styles.screenTitle}>DEUR History</Text>
-      <Text style={styles.screenSubtitle}>Your submitted and past reports</Text>
+      <Text style={[styles.screenTitle, { color: c.textPrimary }]}>DEUR History</Text>
+      <Text style={[styles.screenSubtitle, { color: c.textMuted }]}>Your submitted and past reports</Text>
 
-      <View style={styles.searchContainer}>
-        <Search size={18} color={colors.slate400} strokeWidth={2} />
+      <View style={[styles.searchContainer, { backgroundColor: c.inputBg, borderColor: c.inputBorder }]}>
+        <Search size={18} color={c.textMuted} strokeWidth={2} />
         <TextInput
-          style={styles.searchInput}
+          style={[styles.searchInput, { color: c.textPrimary }]}
           placeholder="Search by date, equipment, or rental"
-          placeholderTextColor={colors.slate400}
+          placeholderTextColor={c.textMuted}
           value={search}
           onChangeText={setSearch}
         />
@@ -78,35 +82,30 @@ export default function HistoryScreen() {
                   activeOpacity={0.7}
                 >
                   <View style={styles.cardTop}>
-                    <Text style={styles.dateText}>{formatDate(d.date)}</Text>
+                    <View>
+                      <Text style={[styles.dateText, { color: c.textPrimary }]}>{formatDate(d.date)}</Text>
+                      <Text style={[styles.deurNumberText, { color: c.blue600 }]}>{d.deurNumber}</Text>
+                    </View>
                     <StatusChip
                       label={d.status.toUpperCase()}
-                      variant={
-                        d.status === 'Submitted' || d.status === 'Acknowledged'
-                          ? 'blue'
-                          : d.status === 'Rejected'
-                            ? 'red'
-                            : d.status === 'Active'
-                              ? 'emerald'
-                              : 'amber'
-                      }
+                      variant={getStatusVariant(d.status)}
                     />
                   </View>
-                  <Text style={styles.equipmentName}>{eq?.name ?? 'Unknown'}</Text>
+                  <Text style={[styles.equipmentName, { color: c.textSecondary }]}>{eq?.name ?? 'Unknown'}</Text>
                   <View style={styles.cardDetails}>
-                    <Text style={styles.detailText}>{rnt?.rentalNumber ?? '---'}</Text>
-                    <Text style={styles.dot}>•</Text>
-                    <Text style={styles.detailText}>{formatDurationShort(netOp)} operating</Text>
-                    <Text style={styles.dot}>•</Text>
-                    <Text style={styles.detailText}>{formatDurationShort(totalMs)} total</Text>
+                    <Text style={[styles.detailText, { color: c.textMuted }]}>{rnt?.rentalNumber ?? '---'}</Text>
+                    <Text style={[styles.dot, { color: c.slate300 }]}>•</Text>
+                    <Text style={[styles.detailText, { color: c.textMuted }]}>{formatDurationShort(netOp)} operating</Text>
+                    <Text style={[styles.dot, { color: c.slate300 }]}>•</Text>
+                    <Text style={[styles.detailText, { color: c.textMuted }]}>{formatDurationShort(totalMs)} total</Text>
                     {d.operatorSegments.length > 1 && (
                       <>
-                        <Text style={styles.dot}>•</Text>
-                        <Text style={styles.detailText}>{d.operatorSegments.length} operators</Text>
+                        <Text style={[styles.dot, { color: c.slate300 }]}>•</Text>
+                        <Text style={[styles.detailText, { color: c.textMuted }]}>{d.operatorSegments.length} operators</Text>
                       </>
                     )}
                   </View>
-                  <ChevronRight size={18} color={colors.slate300} strokeWidth={2} style={styles.chevron} />
+                  <ChevronRight size={18} color={c.slate300} strokeWidth={2} style={styles.chevron} />
                 </TouchableOpacity>
               </Card>
             );
@@ -120,7 +119,6 @@ export default function HistoryScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.slate50,
   },
   content: {
     padding: spacing.lg,
@@ -130,21 +128,17 @@ const styles = StyleSheet.create({
   screenTitle: {
     fontFamily: fonts.extrabold,
     fontSize: 24,
-    color: colors.slate900,
   },
   screenSubtitle: {
     fontFamily: fonts.medium,
     fontSize: 13,
-    color: colors.slate500,
     marginTop: -4,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: colors.white,
     borderWidth: 1.5,
-    borderColor: colors.slate200,
     borderRadius: radius.md,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -153,7 +147,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontFamily: fonts.regular,
     fontSize: 14,
-    color: colors.slate900,
     minHeight: 24,
   },
   list: {
@@ -175,12 +168,10 @@ const styles = StyleSheet.create({
   dateText: {
     fontFamily: fonts.bold,
     fontSize: 14,
-    color: colors.slate900,
   },
   equipmentName: {
     fontFamily: fonts.semibold,
     fontSize: 13,
-    color: colors.slate700,
     marginBottom: 4,
   },
   cardDetails: {
@@ -192,12 +183,15 @@ const styles = StyleSheet.create({
   detailText: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    color: colors.slate500,
   },
   dot: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    color: colors.slate300,
+  },
+  deurNumberText: {
+    fontFamily: fonts.extrabold,
+    fontSize: 12,
+    marginTop: 2,
   },
   chevron: {
     position: 'absolute',

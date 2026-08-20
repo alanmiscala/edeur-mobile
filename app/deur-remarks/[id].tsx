@@ -1,16 +1,21 @@
 import { useState } from 'react';
-import { StyleSheet, Text, View, ScrollView, TextInput, type ViewStyle } from 'react-native';
+import { StyleSheet, Text, View, ScrollView } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MessageSquare, AlertTriangle } from 'lucide-react-native';
-import { colors, fonts, radius, spacing } from '@/lib/theme';
+import { fonts, radius, spacing } from '@/lib/theme';
+import { useTheme } from '@/lib/useTheme';
 import { mockRepository } from '@/lib/mockRepository';
 import { Card } from '@/components/Card';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/Button';
+import { ThemedTextInput } from '@/components/ThemedTextInput';
 
 export default function DeurRemarksScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { colors: c } = useTheme();
+  const insets = useSafeAreaInsets();
   const deur = mockRepository.getDeurById(id);
 
   const [remarks, setRemarks] = useState(deur?.remarks ?? '');
@@ -22,56 +27,48 @@ export default function DeurRemarksScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
+    <ScrollView style={[styles.container, { backgroundColor: c.background }]} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1, paddingBottom: insets.bottom + 20 }}>
       <PageHeader title="Remarks" onBack={() => router.back()} />
       <View style={styles.content}>
         <View style={styles.iconHeader}>
-          <View style={styles.iconCircle}>
-            <MessageSquare size={28} color={colors.blue600} strokeWidth={2} />
+          <View style={[styles.iconCircle, { backgroundColor: c.blue50 }]}>
+            <MessageSquare size={28} color={c.blue600} strokeWidth={2} />
           </View>
-          <Text style={styles.iconTitle}>Shift Remarks</Text>
-          <Text style={styles.iconSubtitle}>Add general remarks and breakdown notes for this shift</Text>
+          <Text style={[styles.iconTitle, { color: c.textPrimary }]}>Shift Remarks</Text>
+          <Text style={[styles.iconSubtitle, { color: c.textMuted }]}>Add general remarks and breakdown notes for this shift</Text>
         </View>
 
         <Card style={styles.card}>
           <View style={styles.field}>
             <View style={styles.fieldHeader}>
-              <MessageSquare size={16} color={colors.slate400} strokeWidth={2} />
-              <Text style={styles.label}>General Remarks</Text>
+              <MessageSquare size={16} color={c.textMuted} strokeWidth={2} />
+              <Text style={[styles.label, { color: c.textPrimary }]}>General Remarks</Text>
             </View>
-            <View style={styles.inputContainer}>
-              <TextInput
-                style={styles.input}
-                value={remarks}
-                onChangeText={setRemarks}
-                placeholder="Any general notes about the shift..."
-                placeholderTextColor={colors.slate400}
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
-              />
-            </View>
+            <ThemedTextInput
+              value={remarks}
+              onChangeText={setRemarks}
+              placeholder="Any general notes about the shift..."
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+            />
           </View>
         </Card>
 
-        <Card style={[styles.card, { borderColor: colors.red50 }] as unknown as ViewStyle}>
+        <Card style={[styles.card, { borderColor: c.red50 }] as any}>
           <View style={styles.field}>
             <View style={styles.fieldHeader}>
-              <AlertTriangle size={16} color={colors.red500} strokeWidth={2} />
-              <Text style={[styles.label, { color: colors.red500 }]}>Breakdown / Issue Notes</Text>
+              <AlertTriangle size={16} color={c.red500} strokeWidth={2} />
+              <Text style={[styles.label, { color: c.red500 }]}>Breakdown / Issue Notes</Text>
             </View>
-            <View style={styles.inputContainer}>
-              <TextInput
-                style={styles.input}
-                value={breakdownRemarks}
-                onChangeText={setBreakdownRemarks}
-                placeholder="Describe any breakdowns or issues encountered..."
-                placeholderTextColor={colors.slate400}
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
-              />
-            </View>
+            <ThemedTextInput
+              value={breakdownRemarks}
+              onChangeText={setBreakdownRemarks}
+              placeholder="Describe any breakdowns or issues encountered..."
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+            />
           </View>
         </Card>
 
@@ -84,7 +81,6 @@ export default function DeurRemarksScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.slate50,
   },
   content: {
     padding: spacing.lg,
@@ -100,19 +96,16 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: colors.blue50,
     alignItems: 'center',
     justifyContent: 'center',
   },
   iconTitle: {
     fontFamily: fonts.extrabold,
     fontSize: 18,
-    color: colors.slate900,
   },
   iconSubtitle: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.slate500,
     textAlign: 'center',
     lineHeight: 18,
   },
@@ -130,12 +123,9 @@ const styles = StyleSheet.create({
   label: {
     fontFamily: fonts.semibold,
     fontSize: 13,
-    color: colors.slate900,
   },
   inputContainer: {
-    backgroundColor: colors.slate50,
     borderWidth: 1.5,
-    borderColor: colors.slate200,
     borderRadius: radius.md,
     paddingHorizontal: 12,
     paddingVertical: 12,
@@ -144,7 +134,6 @@ const styles = StyleSheet.create({
   input: {
     fontFamily: fonts.regular,
     fontSize: 15,
-    color: colors.slate900,
     minHeight: 76,
   },
   saveButton: {

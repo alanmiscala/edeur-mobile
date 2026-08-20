@@ -1,31 +1,14 @@
 import { Redirect } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useAuth } from '@/lib/auth';
-import { colors } from '@/lib/theme';
+import { useTheme } from '@/lib/useTheme';
 
 export default function IndexScreen() {
   const { operator } = useAuth();
-
-  if (operator === undefined) {
-    return (
-      <View style={styles.container}>
-        <ActivityIndicator size="large" color={colors.blue600} />
-      </View>
-    );
-  }
-
-  if (!operator) {
-    return <Redirect href="/login" />;
-  }
-
+  const { colors: c } = useTheme();
+  if (operator === undefined) return <View style={[styles.container, { backgroundColor: c.background }]}><ActivityIndicator size="large" color={c.blue600} /></View>;
+  if (!operator) return <Redirect href="/login" />;
   return <Redirect href="/(tabs)/home" />;
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.slate50,
-  },
-});
+const styles = StyleSheet.create({ container: { flex: 1, alignItems: 'center', justifyContent: 'center' } });

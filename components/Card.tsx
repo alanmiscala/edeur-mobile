@@ -1,21 +1,10 @@
 import { StyleSheet, View, type ViewStyle } from 'react-native';
-import { colors, radius } from '@/lib/theme';
+import { useTheme } from '@/lib/useTheme';
+import { radius } from '@/lib/theme';
 
-interface CardProps {
-  children: React.ReactNode;
-  style?: ViewStyle;
-}
-
+interface CardProps { children: React.ReactNode; style?: ViewStyle; }
 export function Card({ children, style }: CardProps) {
-  return <View style={[styles.card, style]}>{children}</View>;
+  const { colors: c } = useTheme();
+  return <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.surfaceBorder }, style]}>{children}</View>;
 }
-
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.white,
-    borderRadius: radius.xxl,
-    borderWidth: 1,
-    borderColor: colors.slate200,
-    padding: 16,
-  },
-});
+const styles = StyleSheet.create({ card: { borderRadius: radius.xxl, borderWidth: 1, padding: 16 } });

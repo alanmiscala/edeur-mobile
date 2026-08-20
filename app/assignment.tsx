@@ -1,6 +1,9 @@
 import { StyleSheet, Text, View, ScrollView } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Truck, MapPin, FileText, User, Calendar, Gauge } from 'lucide-react-native';
-import { colors, fonts, radius, spacing } from '@/lib/theme';
+import { fonts, radius, spacing } from '@/lib/theme';
+import { useTheme } from '@/lib/useTheme';
+import type { ThemeColors } from '@/lib/theme';
 import { useAuth } from '@/lib/auth';
 import { mockRepository } from '@/lib/mockRepository';
 import { Card } from '@/components/Card';
@@ -12,100 +15,102 @@ import { useRouter } from 'expo-router';
 export default function AssignmentScreen() {
   const router = useRouter();
   const { operator } = useAuth();
+  const { colors: c } = useTheme();
+  const insets = useSafeAreaInsets();
   if (!operator) return null;
 
-  const assignment = mockRepository.getOperatorAssignment(operator.id);
+  const activeDeur = mockRepository.getActiveDeurForOperator(operator.id);
+  const assignment = mockRepository.getOperatorAssignment(operator.id) ?? (activeDeur ? mockRepository.getAssignmentForDeur(activeDeur.id) : null);
   const equipment = assignment ? mockRepository.getEquipment(assignment.equipmentId) : null;
   const project = assignment ? mockRepository.getProject(assignment.projectId) : null;
-  const rental = mockRepository.getRentalForOperator(operator.id);
+  const rental = mockRepository.getRentalForOperator(operator.id) ?? (activeDeur ? mockRepository.getRentalForDeur(activeDeur.id) : null);
 
   if (!equipment || !assignment || !project || !rental) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: c.background }]}>
         <PageHeader title="My Equipment" onBack={() => router.back()} />
         <View style={styles.empty}>
-          <Text style={styles.emptyText}>No active assignment found.</Text>
+          <Text style={[styles.emptyText, { color: c.textMuted }]}>No active assignment found.</Text>
         </View>
       </View>
     );
   }
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={[styles.container, { backgroundColor: c.background }]} contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
       <PageHeader title="My Equipment" onBack={() => router.back()} />
       <View style={styles.content}>
         <Card style={styles.card}>
           <View style={styles.equipmentRow}>
-            <View style={styles.equipmentIcon}>
-              <Truck size={24} color={colors.blue600} strokeWidth={2} />
+            <View style={[styles.equipmentIcon, { backgroundColor: c.blue50 }]}>
+              <Truck size={24} color={c.blue600} strokeWidth={2} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.equipmentName}>{equipment.name}</Text>
-              <Text style={styles.assetNumber}>{equipment.assetNumber}</Text>
+              <Text style={[styles.equipmentName, { color: c.textPrimary }]}>{equipment.name}</Text>
+              <Text style={[styles.assetNumber, { color: c.textMuted }]}>{equipment.assetNumber}</Text>
             </View>
             <StatusChip label={equipment.status.toUpperCase()} variant="blue" />
           </View>
         </Card>
 
-        <Text style={styles.sectionLabel}>EQUIPMENT DETAILS</Text>
+        <Text style={[styles.sectionLabel, { color: c.textMuted }]}>EQUIPMENT DETAILS</Text>
         <Card style={styles.card}>
-          <DetailRow icon={<Gauge size={16} color={colors.slate400} strokeWidth={2} />} label="Category" value={equipment.category} />
-          <Divider />
-          <DetailRow icon={<FileText size={16} color={colors.slate400} strokeWidth={2} />} label="Status" value={equipment.status} />
-          <Divider />
-          <DetailRow icon={<Gauge size={16} color={colors.slate400} strokeWidth={2} />} label="Hour Meter" value={`${equipment.hourMeter.toLocaleString()} h`} />
+          <DetailRow icon={<Gauge size={16} color={c.textMuted} strokeWidth={2} />} label="Category" value={equipment.category} c={c} />
+          <Divider c={c} />
+          <DetailRow icon={<FileText size={16} color={c.textMuted} strokeWidth={2} />} label="Status" value={equipment.status} c={c} />
+          <Divider c={c} />
+          <DetailRow icon={<Gauge size={16} color={c.textMuted} strokeWidth={2} />} label="Hour Meter" value={`${equipment.hourMeter.toLocaleString()} h`} c={c} />
         </Card>
 
-        <Text style={styles.sectionLabel}>ASSIGNMENT</Text>
+        <Text style={[styles.sectionLabel, { color: c.textMuted }]}>ASSIGNMENT</Text>
         <Card style={styles.card}>
-          <DetailRow icon={<User size={16} color={colors.slate400} strokeWidth={2} />} label="Operator" value={operator.name} />
-          <Divider />
-          <DetailRow icon={<MapPin size={16} color={colors.slate400} strokeWidth={2} />} label="Project" value={project.name} />
-          <Divider />
-          <DetailRow icon={<Calendar size={16} color={colors.slate400} strokeWidth={2} />} label="Assigned Date" value={formatDate(assignment.assignedDate)} />
-          <Divider />
-          <DetailRow icon={<FileText size={16} color={colors.slate400} strokeWidth={2} />} label="Assignment Status" value={assignment.status} />
+          <DetailRow icon={<User size={16} color={c.textMuted} strokeWidth={2} />} label="Operator" value={operator.name} c={c} />
+          <Divider c={c} />
+          <DetailRow icon={<MapPin size={16} color={c.textMuted} strokeWidth={2} />} label="Project" value={project.name} c={c} />
+          <Divider c={c} />
+          <DetailRow icon={<Calendar size={16} color={c.textMuted} strokeWidth={2} />} label="Assigned Date" value={formatDate(assignment.assignedDate)} c={c} />
+          <Divider c={c} />
+          <DetailRow icon={<FileText size={16} color={c.textMuted} strokeWidth={2} />} label="Assignment Status" value={assignment.status} c={c} />
         </Card>
 
-        <Text style={styles.sectionLabel}>RENTAL</Text>
+        <Text style={[styles.sectionLabel, { color: c.textMuted }]}>RENTAL</Text>
         <Card style={styles.card}>
           <View style={styles.rentalHeader}>
             <View>
-              <Text style={styles.rentalNumber}>{rental.rentalNumber}</Text>
-              <Text style={styles.rentalCustomer}>{rental.customerName}</Text>
+              <Text style={[styles.rentalNumber, { color: c.blue600 }]}>{rental.rentalNumber}</Text>
+              <Text style={[styles.rentalCustomer, { color: c.textMuted }]}>{rental.customerName}</Text>
             </View>
             <StatusChip label={rental.status.toUpperCase()} variant="blue" />
           </View>
-          <Divider />
-          <DetailRow icon={<Calendar size={16} color={colors.slate400} strokeWidth={2} />} label="Start Date" value={formatDate(rental.startDate)} />
-          <Divider />
-          <DetailRow icon={<Calendar size={16} color={colors.slate400} strokeWidth={2} />} label="End Date" value={formatDate(rental.endDate)} />
-          <Divider />
-          <DetailRow icon={<FileText size={16} color={colors.slate400} strokeWidth={2} />} label="Billing Method" value={rental.billingMethod} />
+          <Divider c={c} />
+          <DetailRow icon={<Calendar size={16} color={c.textMuted} strokeWidth={2} />} label="Start Date" value={formatDate(rental.startDate)} c={c} />
+          <Divider c={c} />
+          <DetailRow icon={<Calendar size={16} color={c.textMuted} strokeWidth={2} />} label="End Date" value={formatDate(rental.endDate)} c={c} />
+          <Divider c={c} />
+          <DetailRow icon={<FileText size={16} color={c.textMuted} strokeWidth={2} />} label="Billing Method" value={rental.billingMethod} c={c} />
         </Card>
       </View>
     </ScrollView>
   );
 }
 
-function DetailRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function DetailRow({ icon, label, value, c }: { icon: React.ReactNode; label: string; value: string; c: ThemeColors }) {
   return (
     <View style={styles.detailRow}>
       {icon}
-      <Text style={styles.detailLabel}>{label}</Text>
-      <Text style={styles.detailValue}>{value}</Text>
+      <Text style={[styles.detailLabel, { color: c.textMuted }]}>{label}</Text>
+      <Text style={[styles.detailValue, { color: c.textPrimary }]}>{value}</Text>
     </View>
   );
 }
 
-function Divider() {
-  return <View style={styles.divider} />;
+function Divider({ c }: { c: ThemeColors }) {
+  return <View style={[styles.divider, { backgroundColor: c.slate100 }]} />;
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.slate50,
   },
   content: {
     padding: spacing.lg,
@@ -120,7 +125,6 @@ const styles = StyleSheet.create({
   emptyText: {
     fontFamily: fonts.medium,
     fontSize: 15,
-    color: colors.slate500,
   },
   card: {
     gap: 0,
@@ -135,24 +139,20 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: radius.md,
-    backgroundColor: colors.blue50,
     alignItems: 'center',
     justifyContent: 'center',
   },
   equipmentName: {
     fontFamily: fonts.bold,
     fontSize: 16,
-    color: colors.slate900,
   },
   assetNumber: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.slate500,
   },
   sectionLabel: {
     fontFamily: fonts.extrabold,
     fontSize: 13,
-    color: colors.slate500,
     letterSpacing: 0.5,
   },
   detailRow: {
@@ -165,16 +165,13 @@ const styles = StyleSheet.create({
     flex: 1,
     fontFamily: fonts.regular,
     fontSize: 14,
-    color: colors.slate500,
   },
   detailValue: {
     fontFamily: fonts.bold,
     fontSize: 14,
-    color: colors.slate900,
   },
   divider: {
     height: 1,
-    backgroundColor: colors.slate100,
     marginLeft: 16,
   },
   rentalHeader: {
@@ -186,12 +183,10 @@ const styles = StyleSheet.create({
   rentalNumber: {
     fontFamily: fonts.extrabold,
     fontSize: 16,
-    color: colors.blue600,
   },
   rentalCustomer: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.slate500,
     marginTop: 2,
   },
 });
